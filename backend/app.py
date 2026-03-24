@@ -17,6 +17,9 @@ from collections import Counter
 
 from flask_migrate import Migrate
 
+# 导入 AI 解析模块
+from ai_parser import parse_with_ai
+
 # --- 1. 初始化和配置 ---
 load_dotenv()
 
@@ -139,14 +142,14 @@ def get_weather_for_date(city_location_id, date_str):
         response = requests.get(url, timeout=5)
         data = response.json()
         
-        print(f"\n=== 天气查询调试信息 ===")
-        print(f"城市 ID: {city_location_id}")
-        print(f"查询日期：{date_str}")
-        print(f"API 返回码：{data.get('code')}")
+        # print(f"\n=== 天气查询调试信息 ===")
+        # print(f"城市 ID: {city_location_id}")
+        # print(f"查询日期：{date_str}")
+        # print(f"API 返回码：{data.get('code')}")
         
         if data.get('code') == '200':
             daily_forecasts = data.get('daily', [])
-            print(f"获取到 {len(daily_forecasts)} 天的天气预报")
+            # print(f"获取到 {len(daily_forecasts)} 天的天气预报")
             
             # 打印所有可用的日期
             for i, forecast in enumerate(daily_forecasts):
@@ -154,7 +157,7 @@ def get_weather_for_date(city_location_id, date_str):
                 text_day = forecast.get('textDay', '未知')
                 temp_min = forecast.get('tempMin', '?')
                 temp_max = forecast.get('tempMax', '?')
-                print(f"  第{i}天：{fx_date} - {text_day}, {temp_min}~{temp_max}℃")
+                # print(f"  第{i}天：{fx_date} - {text_day}, {temp_min}~{temp_max}℃")
             
             # 尝试精确匹配日期
             for daily_forecast in daily_forecasts:
@@ -164,8 +167,8 @@ def get_weather_for_date(city_location_id, date_str):
                     temp_min = daily_forecast.get('tempMin', '?')
                     temp_max = daily_forecast.get('tempMax', '?')
                     result = f"{text_day}，气温 {temp_min}~{temp_max}℃"
-                    print(f"✓ 匹配成功：{result}")
-                    print(f"========================\n")
+                    # print(f"✓ 匹配成功：{result}")
+                    # print(f"========================\n")
                     return result
             
             # 如果没找到 exact match，尝试获取今天或明天的预报
@@ -212,11 +215,26 @@ def get_weather_for_date(city_location_id, date_str):
         print(f"✗ 天气 API 请求异常：{e}")
         return "天气服务暂不可用"
 # 自然语言解析函数
-def parse_natural_language(text):
+def parse_natural_language(text,timezone_offset=480):
     """
     解析自然语言指令，提取日程信息
-    示例："安排下周三下午两点的团队会议"
+    优先使用 AI 解析，失败时使用传统规则解析
+    
+    :param text: 用户输入的文本
+    :param timezone_offset: 时区偏移量（分钟），默认 480（UTC+8）
+    :return: 解析后的日程信息
     """
+    
+     # 尝试使用 AI 解析（传入时区偏移量）
+    ai_result = parse_with_ai(text, timezone_offset)
+    
+    if ai_result:
+        print(f"✓ AI 解析成功：{ai_result}")
+        return ai_result
+    
+    print("✗ AI 解析失败，使用传统规则解析")
+    
+    # AI 解析失败时使用传统规则解析
     result = {
         'title': '',
         'start_time': None,
@@ -337,10 +355,19 @@ def parse_natural_language(text):
 # 冲突检测函数
 def detect_schedule_conflicts(user_id, new_start_time, new_end_time, exclude_id=None):
     """
-    检测新日程是否与现有日程冲突
+    检测日程冲突
+    :param user_id: 用户 ID
+    :param new_start_time: 新日程开始时间
+    :param new_end_time: 新日程结束时间（可以为 None，会自动假设为 1 小时）
+    :param exclude_id: 要排除的日程 ID（用于编辑时检查）
+    :return: 冲突列表
     """
     conflicts = []
     
+     # 如果结束时间为 None，假设持续 1 小时
+    if new_end_time is None:
+        new_end_time = new_start_time + timedelta(hours=1)
+
     # 确保传入的时间是 naive datetime
     if new_start_time.tzinfo is not None:
         new_start_time = new_start_time.replace(tzinfo=None)
@@ -779,61 +806,93 @@ def create_schedule_natural(current_user):
     if not data or 'text' not in data:
         return jsonify({'error': '缺少文本指令'}), 400
     
+    # 获取用户时区（默认为 UTC+8，即北京时间）
+    timezone_offset = data.get('timezone_offset', 480)  # 分钟
+    timezone_str = data.get('timezone', 'UTC+8:00')
+    
     try:
-        # 解析自然语言
-        parsed_data = parse_natural_language(data['text'])
+        # 解析自然语言（传入时区偏移量）
+        parsed_data = parse_natural_language(data['text'], timezone_offset)
         
-        # 检测冲突
+        print(f"\n📋 解析后的数据（UTC 时间）:")
+        print(f"   用户时区：{timezone_str} (偏移量：{timezone_offset} 分钟)")
+        print(f"   title: {parsed_data['title']}")
+        print(f"   start_time: {parsed_data['start_time']}")
+        print(f"   end_time: {parsed_data.get('end_time')}")
+        print("-" * 60)
+        
+        # 检测冲突（使用 UTC 时间）
         conflicts = detect_schedule_conflicts(
             current_user.id,
             parsed_data['start_time'],
-            parsed_data['end_time']
+            parsed_data.get('end_time')
         )
         
         if conflicts:
+            # 转换回用户本地时间显示
+            def utc_to_local(utc_dt):
+                if utc_dt is None:
+                    return None
+                return utc_dt + timedelta(minutes=timezone_offset)
+            
             return jsonify({
                 'error': '检测到日程冲突',
                 'conflicts': [{
                     'schedule_id': c['schedule_id'],
                     'title': c['title'],
-                    'start_time': c['start_time'].strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    'end_time': c['end_time'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                    'start_time': utc_to_local(c['start_time']).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(c['end_time']).strftime('%Y-%m-%dT%H:%M:%S') if c['end_time'] else None
                 } for c in conflicts],
                 'parsed_data': {
                     'title': parsed_data['title'],
-                    'start_time': parsed_data['start_time'].strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    'end_time': parsed_data['end_time'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                    'start_time': utc_to_local(parsed_data['start_time']).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(parsed_data['end_time']).strftime('%Y-%m-%dT%H:%M:%S') if parsed_data['end_time'] else None
                 }
             }), 409
         
-        # 获取天气信息
-        schedule_date = parsed_data['start_time'].strftime('%Y-%m-%d')
-        weather_info = get_weather_for_date("101010100", schedule_date)
+        # 获取天气信息（使用用户本地时间的日期）
+        local_date = (parsed_data['start_time'] + timedelta(minutes=timezone_offset)).strftime('%Y-%m-%d')
+        weather_info = get_weather_for_date("101010100", local_date)
         
-        # 创建日程
+        # 创建日程（存储 UTC 时间到数据库）
         new_schedule = Schedule(
             user_id=current_user.id,
             title=parsed_data['title'],
             content=parsed_data.get('content', ''),
-            start_time=parsed_data['start_time'],
-            end_time=parsed_data['end_time'],
+            start_time=parsed_data['start_time'],  # UTC 时间
+            end_time=parsed_data.get('end_time'),  # UTC 时间
             weather_info=weather_info,
-            is_recurring=parsed_data['is_recurring'],
-            recurring_pattern=parsed_data['recurring_pattern'],
-            priority=parsed_data['priority']
+            is_recurring=parsed_data.get('is_recurring', False),
+            recurring_pattern=parsed_data.get('recurring_pattern'),
+            priority=parsed_data.get('priority', 1)
         )
         
         db.session.add(new_schedule)
         db.session.commit()
         
+        # 返回给前端时转换为 UTC 格式（前端自己处理时区转换）
+        result = new_schedule.to_dict()
+        
+        print(f"✅ 日程创建成功:")
+        print(f"   数据库存储（UTC）: {result['start_time']}")
+        print(f"   用户本地时间：{(parsed_data['start_time'] + timedelta(minutes=timezone_offset)).strftime('%Y-%m-%dT%H:%M:%S')}")
+        print("=" * 60)
+        
         return jsonify({
             'message': '日程创建成功',
-            'schedule': new_schedule.to_dict(),
-            'parsed_info': parsed_data
+            'schedule': result,
+            'ai_parsed': True,
+            'timezone_info': {
+                'user_timezone': timezone_str,
+                'offset_minutes': timezone_offset
+            }
         }), 201
         
     except Exception as e:
         db.session.rollback()
+        print(f"❌ 创建日程失败：{str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'解析失败：{str(e)}'}), 500
 
 # 新增：获取智能推荐

@@ -32,6 +32,13 @@ const isLogoutModalVisible = ref(false)
 const isNaturalLanguageMode = ref(false)
 const naturalLanguageInput = ref('')
 const isProcessingNL = ref(false)
+
+// 新增：录音状态
+const isRecording = ref(false)
+const recordingDuration = ref(0)
+const recordingTimer = ref(null)
+
+const isAIProcessing = ref(false)
 const recommendations = ref([])
 const showRecommendations = ref(false)
 const conflictDialog = ref(null)
@@ -43,10 +50,7 @@ const activeTab = ref('schedule') // 'schedule', 'profile', 'settings'
 const isSidebarCollapsed = ref(false)
 
 
-// 新增：录音状态
-const isRecording = ref(false)
-const recordingDuration = ref(0)
-const recordingTimer = ref(null)
+
 
 // 新增：个人信息编辑
 const isProfileEditModalVisible = ref(false)
@@ -319,15 +323,29 @@ async function handleNaturalLanguageSubmit() {
   isProcessingNL.value = true
   
   try {
+    // 获取用户时区信息
+    const timezoneOffset = -new Date().getTimezoneOffset() // 分钟
+    const timezoneHours = Math.floor(Math.abs(timezoneOffset) / 60)
+    const timezoneMinutes = Math.abs(timezoneOffset) % 60
+    const sign = timezoneOffset >= 0 ? '+' : '-'
+    const timezoneStr = `UTC${sign}${timezoneHours}:${String(timezoneMinutes).padStart(2, '0')}`
+    
     const response = await axios.post(`${API_URL}/schedules/natural-language`, {
-      text: naturalLanguageInput.value
+      text: naturalLanguageInput.value,
+      timezone: timezoneStr,
+      timezone_offset: timezoneOffset // 以分钟为单位的偏移量
     })
     
     naturalLanguageInput.value = ''
     isNaturalLanguageMode.value = false
     fetchSchedules()
     
-    alert(`日程已创建：${response.data.schedule.title}`)
+    // 显示 AI 处理结果
+    if (response.data.ai_parsed) {
+      alert(`✨ AI 智能解析成功！日程已创建：${response.data.schedule.title}`)
+    } else {
+      alert(`日程已创建：${response.data.schedule.title}`)
+    }
   } catch (error) {
     if (error.response?.status === 409) {
       conflictDialog.value = error.response.data
@@ -339,6 +357,7 @@ async function handleNaturalLanguageSubmit() {
     isProcessingNL.value = false
   }
 }
+
 
 async function loadRecommendations() {
   try {
@@ -884,6 +903,13 @@ onUnmounted(() => {
               rows="4"
               :disabled="isProcessingNL || isRecording"
             ></textarea>
+            
+            <!-- AI 处理状态指示器 -->
+            <div v-if="isAIProcessing" class="ai-processing-indicator">
+              <span class="ai-icon">🤖</span>
+              <span>AI 正在智能解析中...</span>
+            </div>
+            
             <div class="nl-actions">
               <button 
                 type="button" 
@@ -901,11 +927,13 @@ onUnmounted(() => {
                   <span class="wave-bar"></span>
                 </span>
               </button>
+              
               <div v-if="isRecording" class="recording-indicator">
                 <span class="recording-dot"></span>
                 <span class="recording-label">录音中</span>
                 <span class="recording-time">{{ formatRecordingTime(recordingDuration) }}</span>
               </div>
+              
               <div class="nl-actions-right">
                 <button 
                   type="button" 
@@ -1916,6 +1944,46 @@ input:checked + .slider:before {
   gap: 12px;
   margin-left: auto;
   align-items: center;
+}
+
+.ai-processing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 8px;
+  color: #0284c7;
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 8px;
+  animation: pulse-ai 1.5s infinite;
+}
+
+.ai-icon {
+  font-size: 18px;
+  animation: spin-ai 3s linear infinite;
+}
+
+@keyframes spin-ai {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-ai {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
 }
 
 .recording-indicator {
