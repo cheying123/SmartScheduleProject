@@ -47,6 +47,9 @@ QWEATHER_API_KEY = os.getenv('QWEATHER_API_KEY')  # 获取 (和风)QWeather API 
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')# JWT 密钥
 JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 小时
 
+
+
+
 # --- 2. 数据库模型定义 ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -55,11 +58,12 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
     
-    # 用户偏好设置
-    preferred_work_hours = db.Column(db.JSON, nullable=True)  # 偏好工作时间段
-    preferred_break_hours = db.Column(db.JSON, nullable=True)  # 偏好休息时间段
-    location = db.Column(db.String(255), nullable=True)  # 用户所在城市
-    weather_alerts_enabled = db.Column(db.Boolean, default=True)  # 是否启用天气提醒
+     # 用户偏好设置
+    preferred_work_hours = db.Column(db.JSON, nullable=True)
+    preferred_break_hours = db.Column(db.JSON, nullable=True)
+    location = db.Column(db.String(255), nullable=True)  # 城市 ID
+    location_name = db.Column(db.String(255), nullable=True)  # 城市名称（省份 + 市名）
+    weather_alerts_enabled = db.Column(db.Boolean, default=True)
     
     def to_dict(self):
         return {
@@ -68,6 +72,7 @@ class User(db.Model):
             'email': self.email,
             'created_at': self.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if self.created_at else None,
             'location': self.location,
+            'location_name': self.location_name,
             'weather_alerts_enabled': self.weather_alerts_enabled
         }
 
@@ -214,7 +219,11 @@ def get_weather_for_date(city_location_id, date_str):
     except Exception as e:
         print(f"✗ 天气 API 请求异常：{e}")
         return "天气服务暂不可用"
-# 自然语言解析函数
+    
+
+
+    
+    # 自然语言解析函数
 def parse_natural_language(text,timezone_offset=480):
     """
     解析自然语言指令，提取日程信息
@@ -600,6 +609,126 @@ def login():
 def get_current_user(current_user):
     """获取当前用户信息"""
     return jsonify(current_user.to_dict()), 200
+
+@app.route('/api/users/profile', methods=['PUT'])
+@token_required
+def update_user_profile(current_user):
+    """更新用户个人资料"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'error': '请求数据为空'}), 400
+    
+    try:
+        if 'username' in data:
+            current_user.username = data['username']
+        if 'email' in data:
+            current_user.email = data['email']
+        if 'location' in data:
+            current_user.location = data['location']
+        if 'location_name' in data:
+            current_user.location_name = data['location_name']
+        if 'weather_alerts_enabled' in data:
+            current_user.weather_alerts_enabled = data['weather_alerts_enabled']
+        
+        db.session.commit()
+        return jsonify(current_user.to_dict()), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_city_location_from_coords(latitude, longitude):
+    """
+    根据经纬度获取城市 location ID 和名称
+    使用和风天气的 GeoAPI
+    """
+    if not QWEATHER_API_KEY:
+        return None, None
+    
+    try:
+        url = f"https://mh78m2gduk.re.qweatherapi.com/geo/v2/city/lookup?location={longitude},{latitude}&key={QWEATHER_API_KEY}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        
+        if data.get('code') == '200' and len(data.get('location', [])) > 0:
+            location_info = data['location'][0]
+            city_id = location_info['id']
+            # 组合省份 + 城市名
+            adm1 = location_info.get('adm1', '')  # 省份
+            adm2 = location_info.get('adm2', '')  # 城市
+            city_name = f"{adm1}{adm2}" if adm1 and adm2 else location_info.get('name', city_id)
+            return city_id, city_name
+        return None, None
+    except Exception as e:
+        print(f"获取城市位置失败：{e}")
+        return None, None
+    
+@app.route('/api/location/geocode', methods=['POST'])
+@token_required
+def geocode_location(current_user):
+    """根据经纬度获取城市信息"""
+    data = request.get_json()
+    
+    if not data or 'latitude' not in data or 'longitude' not in data:
+        return jsonify({'error': '缺少经纬度参数'}), 400
+    
+    try:
+        latitude = data['latitude']
+        longitude = data['longitude']
+        
+        city_location_id, city_name = get_city_location_from_coords(latitude, longitude)
+        
+        if not city_location_id:
+            return jsonify({'error': '无法解析地理位置'}), 404
+        
+        return jsonify({
+            'city_location_id': city_location_id,
+            'city_name': city_name,
+            'latitude': latitude,
+            'longitude': longitude
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/api/weather/update-all', methods=['POST'])
+@token_required
+def update_all_weather(current_user):
+    """更新当前用户所有日程的天气信息"""
+    try:
+        schedules = Schedule.query.filter_by(user_id=current_user.id).all()
+        
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        tomorrow = (datetime.datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        city_location_id = "101010100"  # 默认北京
+        
+        if current_user.location:
+            city_location_id = current_user.location
+        
+        updated_count = 0
+        for schedule in schedules:
+            schedule_date = schedule.start_time.strftime('%Y-%m-%d')
+            
+            if schedule_date == today or schedule_date == tomorrow:
+                weather_info = get_weather_for_date(city_location_id, schedule_date)
+                if weather_info and "未能查询" not in weather_info and "API Key" not in weather_info:
+                    schedule.weather_info = weather_info
+                    updated_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'已更新 {updated_count} 个日程的天气信息',
+            'updated_count': updated_count
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+
 
 # --- 5. API 接口定义(基础功能) ---
 @app.route('/api/schedules', methods=['GET'])

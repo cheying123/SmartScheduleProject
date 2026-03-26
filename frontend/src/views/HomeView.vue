@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Calendar, PlusCircle, Sun, Edit2, Trash2, Check, LogOut, Globe } from 'lucide-vue-next'
+import { Calendar, PlusCircle, Sun, Edit2, Trash2, Check, LogOut, Globe, MapPin, Loader } from 'lucide-vue-next'
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
 
@@ -58,8 +58,20 @@ const profileForm = ref({
   username: '',
   email: '',
   location: '',
+  location_name: '',
   weather_alerts_enabled: true
 })
+
+const isLocating = ref(false)
+const locationStatus = ref('')
+
+
+
+
+
+
+
+
 
 // --- 计算属性 ---
 const groupedSchedules = computed(() => {
@@ -286,10 +298,13 @@ function openProfileEdit() {
     username: userStore.user?.username || '',
     email: userStore.user?.email || '',
     location: userStore.user?.location || '',
+    location_name: userStore.user?.location_name || '',
     weather_alerts_enabled: userStore.user?.weather_alerts_enabled !== false
   }
   isProfileEditModalVisible.value = true
 }
+  
+
 
 // 新增：保存个人资料
 async function saveProfile() {
@@ -307,6 +322,110 @@ async function saveProfile() {
     alert('更新失败，请重试')
   }
 }
+
+async function locateUser() {
+  if (!navigator.geolocation) {
+    alert('您的浏览器不支持地理定位功能')
+    return
+  }
+  
+  isLocating.value = true
+  locationStatus.value = '正在获取您的位置...'
+  
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      try {
+        const { latitude, longitude } = position.coords
+        
+        locationStatus.value = '正在查询位置信息...'
+        
+        const response = await axios.post(`${API_URL}/location/geocode`, {
+          latitude,
+          longitude
+        }, {
+          headers: {
+            'Authorization': `Bearer ${userStore.token}`
+          }
+        })
+        
+        const { city_location_id, city_name } = response.data
+        
+        profileForm.value.location = city_location_id
+        profileForm.value.location_name = city_name
+        locationStatus.value = `定位成功！${city_name}`
+        
+        setTimeout(() => {
+          locationStatus.value = ''
+        }, 3000)
+        
+      } catch (error) {
+        console.error('定位失败:', error)
+        locationStatus.value = '定位失败：' + (error.response?.data?.error || '网络错误')
+        setTimeout(() => {
+          locationStatus.value = ''
+        }, 5000)
+      } finally {
+        isLocating.value = false
+      }
+    },
+    (error) => {
+      isLocating.value = false
+      locationStatus.value = '定位失败：' + error.message
+      setTimeout(() => {
+        locationStatus.value = ''
+      }, 5000)
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000
+    }
+  )
+}
+
+async function refreshWeather() {
+  if (!profileForm.value.location) {
+    alert('请先设置城市位置')
+    return
+  }
+  
+  try {
+    const response = await axios.post(`${API_URL}/weather/update-all`, {}, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      }
+    })
+    
+    alert(response.data.message)
+    await fetchSchedules()
+  } catch (error) {
+    console.error('刷新天气失败:', error)
+    alert('刷新天气失败，请重试')
+  }
+}
+
+async function refreshWeatherFromProfile() {
+  if (!userStore.user?.location) {
+    alert('请先在个人资料中设置城市位置')
+    openProfileEdit()
+    return
+  }
+  
+  try {
+    const response = await axios.post(`${API_URL}/weather/update-all`, {}, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      }
+    })
+    
+    alert(response.data.message)
+    await fetchSchedules()
+  } catch (error) {
+    console.error('刷新天气失败:', error)
+    alert('刷新天气失败，请重试')
+  }
+}
+
 
 function handleLogout() {
   userStore.logout()
@@ -712,14 +831,26 @@ onUnmounted(() => {
             <div class="profile-info">
               <h2>{{ userStore.user?.username }}</h2>
               <p class="profile-email">{{ userStore.user?.email || '未设置邮箱' }}</p>
+              <p class="profile-location" v-if="userStore.user?.location_name">
+                📍 {{ userStore.user.location_name }}
+              </p>
+              <p class="profile-location" v-else-if="userStore.user?.location">
+                📍 城市 ID: {{ userStore.user.location }}
+              </p>
               <p class="profile-join-date">
                 注册时间：{{ userStore.user?.created_at ? new Date(userStore.user.created_at).toLocaleDateString('zh-CN') : '未知' }}
               </p>
             </div>
-            <button class="edit-profile-btn" @click="openProfileEdit">
-              <Edit2 :size="18" />
-              <span>编辑资料</span>
-            </button>
+            <div class="profile-actions">
+              <button class="edit-profile-btn" @click="openProfileEdit">
+                <Edit2 :size="18" />
+                <span>编辑资料</span>
+              </button>
+              <button class="refresh-weather-btn" @click="refreshWeatherFromProfile" title="根据当前位置更新所有日程天气">
+                <Sun :size="18" />
+                <span>更新天气</span>
+              </button>
+            </div>
           </div>
           
           <div class="profile-stats">
@@ -1027,8 +1158,36 @@ onUnmounted(() => {
             </div>
             <div class="form-group">
               <label for="profile-location">所在城市</label>
-              <input id="profile-location" type="text" v-model="profileForm.location" placeholder="例如：北京">
+              <div class="location-input-group">
+                <input 
+                  id="profile-location" 
+                  type="text" 
+                  v-model="profileForm.location_name" 
+                  placeholder="例如：101010100（北京）"
+                  :disabled="isLocating"
+                >
+                <button 
+                  type="button" 
+                  class="locate-btn" 
+                  @click="locateUser"
+                  :disabled="isLocating"
+                  title="自动定位当前位置"
+                >
+                  <MapPin :size="18" :class="{ 'spinning': isLocating }" />
+                  <span v-if="isLocating">定位中...</span>
+                  <span v-else>📍 定位</span>
+                </button>
+              </div>
+              <div v-if="profileForm.location_name" class="current-city-name">
+                当前城市：<strong>{{ profileForm.location_name }}</strong>
+              </div>
+              <div v-if="locationStatus" class="location-status" :class="{ 'status-error': locationStatus.includes('失败') }">
+                {{ locationStatus }}
+              </div>
+              <small class="form-hint">点击"定位"按钮自动获取当前位置，或手动输入城市 ID</small>
             </div>
+
+
             <div class="form-group">
               <label class="checkbox-label">
                 <input type="checkbox" v-model="profileForm.weather_alerts_enabled" class="checkbox-input">
@@ -1349,10 +1508,48 @@ onUnmounted(() => {
   color: white;
 }
 
+.profile-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-direction: column;
+}
+
 .profile-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.5rem;
+}
+
+.refresh-weather-btn {
+  background-color: #2dce89;
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: white;
+  transition: all 0.2s;
+}
+
+.refresh-weather-btn:hover {
+  background-color: #26b87a;
+  transform: translateY(-2px);
+}
+
+.profile-location {
+  margin: 0.25rem 0;
+  color: #8898aa;
+  font-size: 0.9rem;
+}
+
+.location-id {
+  font-size: 0.8rem;
+  color: #adb5bd;
+  font-weight: normal;
 }
 
 .stat-item {
@@ -2372,6 +2569,73 @@ input:checked + .slider:before {
 .checkbox-input {
   width: auto;
   cursor: pointer;
+}
+
+.form-hint {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #8898aa;
+  font-style: italic;
+}
+
+.current-city-name {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: #f8f9fe;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #5E72E4;
+}
+
+.current-city-name strong {
+  font-weight: 600;
+  color: #32325D;
+}
+
+.location-input-group input {
+  flex: 1;
+}
+
+.locate-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: #5E72E4;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.locate-btn:hover:not(:disabled) {
+  background-color: #4a5fd6;
+  transform: translateY(-1px);
+}
+
+.locate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.locate-btn svg.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.location-status {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #2dce89;
+  font-weight: 500;
+}
+
+.location-status.status-error {
+  color: #f5365c;
 }
 
 .form-actions {
