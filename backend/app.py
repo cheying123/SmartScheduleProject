@@ -136,35 +136,43 @@ def get_weather_for_date(city_location_id, date_str):
     获取指定日期的天气预报信息
     city_location_id: 城市 location ID（如北京是 101010100）
     date_str: 日期字符串，格式 YYYY-MM-DD
+    
+    注意：和风天气 7 天预报 API 只能获取未来 7 天的天气
     """
     if not QWEATHER_API_KEY:
         print("警告：QWEATHER_API_KEY 未配置")
-        return "天气 API Key 未配置"
+        return None
     
     try:
-        # 使用 3 天天气预报 API
+        from datetime import datetime, timedelta
+        
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 如果查询的是过去的日期，返回 None 表示不更新
+        if date_str < today:
+            return None
+        
+        # 使用 7 天天气预报 API
         url = f"https://mh78m2gduk.re.qweatherapi.com/v7/weather/7d?location={city_location_id}&key={QWEATHER_API_KEY}"
         response = requests.get(url, timeout=5)
         data = response.json()
         
-        # print(f"\n=== 天气查询调试信息 ===")
-        # print(f"城市 ID: {city_location_id}")
-        # print(f"查询日期：{date_str}")
-        # print(f"API 返回码：{data.get('code')}")
+        print(f"\n=== 天气查询调试信息 ===")
+        print(f"城市 ID: {city_location_id}")
+        print(f"查询日期：{date_str}")
+        print(f"API 返回码：{data.get('code')}")
         
         if data.get('code') == '200':
             daily_forecasts = data.get('daily', [])
-            # print(f"获取到 {len(daily_forecasts)} 天的天气预报")
+            print(f"获取到 {len(daily_forecasts)} 天的天气预报")
             
-            # 打印所有可用的日期
             for i, forecast in enumerate(daily_forecasts):
                 fx_date = forecast.get('fxDate')
                 text_day = forecast.get('textDay', '未知')
                 temp_min = forecast.get('tempMin', '?')
                 temp_max = forecast.get('tempMax', '?')
-                # print(f"  第{i}天：{fx_date} - {text_day}, {temp_min}~{temp_max}℃")
+                print(f"  第{i}天：{fx_date} - {text_day}, {temp_min}~{temp_max}℃")
             
-            # 尝试精确匹配日期
             for daily_forecast in daily_forecasts:
                 fx_date = daily_forecast.get('fxDate')
                 if fx_date == date_str:
@@ -172,58 +180,49 @@ def get_weather_for_date(city_location_id, date_str):
                     temp_min = daily_forecast.get('tempMin', '?')
                     temp_max = daily_forecast.get('tempMax', '?')
                     result = f"{text_day}，气温 {temp_min}~{temp_max}℃"
-                    # print(f"✓ 匹配成功：{result}")
-                    # print(f"========================\n")
+                    print(f"✓ 匹配成功：{result}")
+                    print(f"========================\n")
                     return result
             
-            # 如果没找到 exact match，尝试获取今天或明天的预报
-            from datetime import datetime, timedelta
-            today = datetime.now().strftime('%Y-%m-%d')
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            target_date = datetime.strptime(date_str, '%Y-%m-%d')
+            today_date = datetime.strptime(today, '%Y-%m-%d')
+            days_diff = (target_date - today_date).days
             
-            if date_str == today and len(daily_forecasts) > 0:
-                # 查询今天但没匹配到，使用第一天的预报
-                first_day = daily_forecasts[0]
-                text_day = first_day.get('textDay', '未知')
-                temp_min = first_day.get('tempMin', '?')
-                temp_max = first_day.get('tempMax', '?')
+            print(f"日期相差 {days_diff} 天")
+            
+            if 0 <= days_diff < len(daily_forecasts):
+                forecast = daily_forecasts[days_diff]
+                text_day = forecast.get('textDay', '未知')
+                temp_min = forecast.get('tempMin', '?')
+                temp_max = forecast.get('tempMax', '?')
                 result = f"{text_day}，气温 {temp_min}~{temp_max}℃"
-                print(f"✓ 使用第一天预报（今天）：{result}")
+                print(f"✓ 使用索引 {days_diff} 的预报：{result}")
                 print(f"========================\n")
                 return result
-            elif date_str == tomorrow and len(daily_forecasts) > 1:
-                # 查询明天，使用第二天的预报
-                second_day = daily_forecasts[1]
-                text_day = second_day.get('textDay', '未知')
-                temp_min = second_day.get('tempMin', '?')
-                temp_max = second_day.get('tempMax', '?')
-                result = f"{text_day}，气温 {temp_min}~{temp_max}℃"
-                print(f"✓ 使用第二天预报（明天）：{result}")
+            else:
+                print(f"✗ 超出天气预报范围（{days_diff}天后）")
                 print(f"========================\n")
-                return result
+                return None
                 
         else:
             error_msg = data.get('code', 'Unknown')
             print(f"✗ API 返回错误：{error_msg}")
-            
-        print(f"✗ 未找到匹配的日期")
-        print(f"========================\n")
-        return "未能查询到该日天气"
+            print(f"========================\n")
+            return None
         
+    except ValueError as e:
+        print(f"✗ 日期格式错误：{e}")
+        return None
     except requests.exceptions.Timeout:
         print("✗ 天气 API 请求超时")
-        return "天气服务暂不可用（超时）"
+        return None
     except requests.exceptions.RequestException as e:
         print(f"✗ 网络请求失败：{e}")
-        return "天气服务暂不可用（网络错误）"
+        return None
     except Exception as e:
         print(f"✗ 天气 API 请求异常：{e}")
-        return "天气服务暂不可用"
-    
+        return None
 
-
-    
-    # 自然语言解析函数
 def parse_natural_language(text,timezone_offset=480):
     """
     解析自然语言指令，提取日程信息
@@ -620,19 +619,33 @@ def update_user_profile(current_user):
         return jsonify({'error': '请求数据为空'}), 400
     
     try:
+        old_location = current_user.location
+        
         if 'username' in data:
             current_user.username = data['username']
         if 'email' in data:
             current_user.email = data['email']
         if 'location' in data:
             current_user.location = data['location']
-        if 'location_name' in data:
-            current_user.location_name = data['location_name']
+            if data['location']:
+                city_name = get_city_location_from_coords(0, 0)
+                current_user.location_name = data.get('location_name')
         if 'weather_alerts_enabled' in data:
             current_user.weather_alerts_enabled = data['weather_alerts_enabled']
         
         db.session.commit()
-        return jsonify(current_user.to_dict()), 200
+        
+        result = current_user.to_dict()
+        
+        if old_location != current_user.location and current_user.location:
+            updated_count = update_schedules_weather_for_user(current_user.id, current_user.location)
+            result['weather_updated'] = True
+            result['updated_count'] = updated_count
+            result['message'] = f'城市已更新，已同步更新 {updated_count} 个日程的天气信息'
+        else:
+            result['weather_updated'] = False
+        
+        return jsonify(result), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -664,6 +677,74 @@ def get_city_location_from_coords(latitude, longitude):
         print(f"获取城市位置失败：{e}")
         return None, None
     
+
+def get_city_name_by_id(city_location_id):
+    """
+    根据城市 location ID 获取城市名称
+    使用和风天气的 GeoAPI
+    """
+    if not QWEATHER_API_KEY or not city_location_id:
+        return None
+    
+    try:
+        url = f"https://geoapi.qweather.com/v2/city/lookup?location={city_location_id}&key={QWEATHER_API_KEY}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        
+        if data.get('code') == '200' and len(data.get('location', [])) > 0:
+            location_info = data['location'][0]
+            adm1 = location_info.get('adm1', '')
+            adm2 = location_info.get('adm2', '')
+            city_name = f"{adm1}{adm2}" if adm1 and adm2 else location_info.get('name', city_location_id)
+            return city_name
+        return None
+    except Exception as e:
+        print(f"查询城市名称失败：{e}")
+        return None
+
+
+def update_schedules_weather_for_user(user_id, city_location_id):
+    """
+    更新指定用户所有日程的天气信息
+    只更新今天和未来 7 天内的日程，过去日程保留原天气
+    """
+    try:
+        schedules = Schedule.query.filter_by(user_id=user_id).all()
+        
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        max_date = (datetime.datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        updated_count = 0
+        skipped_count = 0
+        
+        for schedule in schedules:
+            schedule_date = schedule.start_time.strftime('%Y-%m-%d')
+            
+            # 只更新今天及未来 7 天内的日程
+            if schedule_date >= today and schedule_date <= max_date:
+                weather_info = get_weather_for_date(city_location_id, schedule_date)
+                if weather_info:
+                    schedule.weather_info = weather_info
+                    updated_count += 1
+                    print(f"✓ 更新 {schedule_date}: {weather_info}")
+                else:
+                    print(f"⚠️ {schedule_date}: 无法获取天气")
+            else:
+                skipped_count += 1
+                reason = "已过期" if schedule_date < today else "超出预报范围"
+                print(f"⏭️ 跳过 {schedule_date}（{reason}）- 保留原天气：{schedule.weather_info}")
+        
+        db.session.commit()
+        
+        print(f"\n🌤️ 天气更新完成：更新{updated_count}个，跳过{skipped_count}个\n")
+        return updated_count
+    except Exception as e:
+        db.session.rollback()
+        print(f"更新天气失败：{e}")
+        return 0
+
+
+
 @app.route('/api/location/geocode', methods=['POST'])
 @token_required
 def geocode_location(current_user):
@@ -697,36 +778,18 @@ def geocode_location(current_user):
 def update_all_weather(current_user):
     """更新当前用户所有日程的天气信息"""
     try:
-        schedules = Schedule.query.filter_by(user_id=current_user.id).all()
+        city_location_id = current_user.location or "101010100"
         
-        today = datetime.datetime.now().strftime('%Y-%m-%d')
-        tomorrow = (datetime.datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        city_location_id = "101010100"  # 默认北京
-        
-        if current_user.location:
-            city_location_id = current_user.location
-        
-        updated_count = 0
-        for schedule in schedules:
-            schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-            
-            if schedule_date == today or schedule_date == tomorrow:
-                weather_info = get_weather_for_date(city_location_id, schedule_date)
-                if weather_info and "未能查询" not in weather_info and "API Key" not in weather_info:
-                    schedule.weather_info = weather_info
-                    updated_count += 1
-        
-        db.session.commit()
+        updated_count = update_schedules_weather_for_user(current_user.id, city_location_id)
         
         return jsonify({
             'message': f'已更新 {updated_count} 个日程的天气信息',
-            'updated_count': updated_count
+            'updated_count': updated_count,
+            'city': current_user.location_name or city_location_id
         }), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-
 
 
 
@@ -737,28 +800,35 @@ def get_schedules(current_user):
     """获取当前用户的所有日程，并自动更新天气信息"""
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.start_time.asc()).all()
     
-    # 自动更新每个日程的天气信息
     today = datetime.datetime.now().strftime('%Y-%m-%d')
-    tomorrow = (datetime.datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    max_date = (datetime.datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+    
+    city_location_id = current_user.location or "101010100"
+    
+    print(f"\n📍 使用用户城市 ID: {city_location_id}")
     
     for schedule in schedules:
         schedule_date = schedule.start_time.strftime('%Y-%m-%d')
         
-        # 只更新今天和明天的天气（天气预报通常只有 3-7 天）
-        if schedule_date == today or schedule_date == tomorrow:
+        # 更新今天及未来 7 天内的日程
+        if schedule_date >= today and schedule_date <= max_date:
             try:
-                weather_info = get_weather_for_date("101010100", schedule_date)
-                # 只有当 API 返回有效数据时才更新
-                if weather_info and "未能查询" not in weather_info and "API Key" not in weather_info:
+                weather_info = get_weather_for_date(city_location_id, schedule_date)
+                if weather_info:
                     schedule.weather_info = weather_info
                     print(f"✓ 已更新 {schedule_date} 的天气：{weather_info}")
+                else:
+                    print(f"⚠️ {schedule_date}: 无法获取天气，保留原有信息")
             except Exception as e:
                 print(f"✗ 更新天气失败 {schedule_date}: {e}")
+        else:
+            reason = "已过期" if schedule_date < today else "超出预报范围"
+            print(f"⏭️ 跳过 {schedule_date} ({reason}) - 保留原天气：{schedule.weather_info}")
     
-    # 提交天气信息更新
     db.session.commit()
     
     return jsonify([s.to_dict() for s in schedules])
+
 
 @app.route('/api/schedules', methods=['POST'])
 @token_required
@@ -773,20 +843,20 @@ def create_schedule(current_user):
         print(f"\n=== 创建日程调试信息 ===")
         print(f"前端传来的原始时间：{data['start_time']}")
         
-        # 前端传来的是本地时间的 ISO 字符串（如：2026-03-22T17:54:00）
-        # 我们直接将其作为本地时间存储，不做转换
         local_dt = datetime.datetime.fromisoformat(data['start_time'].replace('Z', ''))
         
         print(f"解析后的本地时间：{local_dt}")
         
         schedule_date = local_dt.strftime('%Y-%m-%d')
-        weather_info = get_weather_for_date("101010100", schedule_date)
+        
+        city_location_id = current_user.location or "101010100"
+        weather_info = get_weather_for_date(city_location_id, schedule_date)
         
         new_schedule = Schedule(
             user_id=current_user.id,
             title=data['title'],
             content=data.get('content', ''),
-            start_time=local_dt,  # 直接存储本地时间
+            start_time=local_dt,
             weather_info=weather_info,
             priority=data.get('priority', 1),
             is_recurring=data.get('is_recurring', False),
@@ -796,6 +866,8 @@ def create_schedule(current_user):
         db.session.commit()
         
         print(f"保存的时间：{new_schedule.start_time}")
+        print(f"使用城市 ID: {city_location_id}")
+        print(f"天气信息：{weather_info}")
         print(f"========================\n")
         
         return jsonify(new_schedule.to_dict()), 201
@@ -809,15 +881,13 @@ def create_schedule(current_user):
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
-
 # 更新日程接口以支持冲突检测
 @app.route('/api/schedules/<int:id>', methods=['PUT'])
 @token_required
 def update_schedule(current_user, id):
+    """更新日程"""
     schedule = Schedule.query.get_or_404(id)
 
-     # 验证日程是否属于当前用户
-     # 觉得没必要，毕竟不同的人的日程相互看不到 (冗余 1)   
     if schedule.user_id != current_user.id:
         return jsonify({'error': '无权操作此日程'}), 403
 
@@ -831,23 +901,21 @@ def update_schedule(current_user, id):
         print(f"日程 ID: {id}")
         print(f"前端传来的数据：{data}")
         
-        # 如果要修改时间，直接存储为本地时间
+        city_location_id = current_user.location or "101010100"
+        
         if 'start_time' in data:
             print(f"原始时间字符串：{data['start_time']}")
             
-            # 移除 Z 标记，直接解析为本地时间
             time_str = data['start_time'].replace('Z', '')
             local_dt = datetime.datetime.fromisoformat(time_str)
             
             print(f"解析后的本地时间：{local_dt}")
             
-            # 计算结束时间（如果没有提供，默认 1 小时）
             end_time = local_dt + timedelta(hours=1)
             if 'end_time' in data:
                 end_time_str = data['end_time'].replace('Z', '')
                 end_time = datetime.datetime.fromisoformat(end_time_str)
             
-            # 检测冲突
             conflicts = detect_schedule_conflicts(
                 current_user.id,
                 local_dt,
@@ -868,7 +936,7 @@ def update_schedule(current_user, id):
             
             schedule.start_time = local_dt
             schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-            schedule.weather_info = get_weather_for_date("101010100", schedule_date)
+            schedule.weather_info = get_weather_for_date(city_location_id, schedule_date)
         
         if 'title' in data:
             schedule.title = data['title']
@@ -877,7 +945,6 @@ def update_schedule(current_user, id):
         if 'priority' in data:
             schedule.priority = int(data['priority'])
         if 'is_recurring' in data:
-            # 安全地转换为 bool
             is_rec = data['is_recurring']
             if isinstance(is_rec, str):
                 schedule.is_recurring = is_rec.lower() in ['true', '1', 'yes']
@@ -889,6 +956,7 @@ def update_schedule(current_user, id):
             schedule.recurring_pattern = data['recurring_pattern'] if data['recurring_pattern'] else None
         
         print(f"更新后的时间：{schedule.start_time}")
+        print(f"使用城市 ID: {city_location_id}")
         print(f"========================\n")
         
         db.session.commit()
@@ -905,7 +973,6 @@ def update_schedule(current_user, id):
         traceback.print_exc()
         db.session.rollback()
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
-
 @app.route('/api/schedules/<int:id>', methods=['DELETE'])
 @token_required
 def delete_schedule(current_user, id):
@@ -935,12 +1002,10 @@ def create_schedule_natural(current_user):
     if not data or 'text' not in data:
         return jsonify({'error': '缺少文本指令'}), 400
     
-    # 获取用户时区（默认为 UTC+8，即北京时间）
-    timezone_offset = data.get('timezone_offset', 480)  # 分钟
+    timezone_offset = data.get('timezone_offset', 480)
     timezone_str = data.get('timezone', 'UTC+8:00')
     
     try:
-        # 解析自然语言（传入时区偏移量）
         parsed_data = parse_natural_language(data['text'], timezone_offset)
         
         print(f"\n📋 解析后的数据（UTC 时间）:")
@@ -950,7 +1015,6 @@ def create_schedule_natural(current_user):
         print(f"   end_time: {parsed_data.get('end_time')}")
         print("-" * 60)
         
-        # 检测冲突（使用 UTC 时间）
         conflicts = detect_schedule_conflicts(
             current_user.id,
             parsed_data['start_time'],
@@ -958,7 +1022,6 @@ def create_schedule_natural(current_user):
         )
         
         if conflicts:
-            # 转换回用户本地时间显示
             def utc_to_local(utc_dt):
                 if utc_dt is None:
                     return None
@@ -979,17 +1042,17 @@ def create_schedule_natural(current_user):
                 }
             }), 409
         
-        # 获取天气信息（使用用户本地时间的日期）
         local_date = (parsed_data['start_time'] + timedelta(minutes=timezone_offset)).strftime('%Y-%m-%d')
-        weather_info = get_weather_for_date("101010100", local_date)
         
-        # 创建日程（存储 UTC 时间到数据库）
+        city_location_id = current_user.location or "101010100"
+        weather_info = get_weather_for_date(city_location_id, local_date)
+        
         new_schedule = Schedule(
             user_id=current_user.id,
             title=parsed_data['title'],
             content=parsed_data.get('content', ''),
-            start_time=parsed_data['start_time'],  # UTC 时间
-            end_time=parsed_data.get('end_time'),  # UTC 时间
+            start_time=parsed_data['start_time'],
+            end_time=parsed_data.get('end_time'),
             weather_info=weather_info,
             is_recurring=parsed_data.get('is_recurring', False),
             recurring_pattern=parsed_data.get('recurring_pattern'),
@@ -999,12 +1062,13 @@ def create_schedule_natural(current_user):
         db.session.add(new_schedule)
         db.session.commit()
         
-        # 返回给前端时转换为 UTC 格式（前端自己处理时区转换）
         result = new_schedule.to_dict()
         
         print(f"✅ 日程创建成功:")
         print(f"   数据库存储（UTC）: {result['start_time']}")
         print(f"   用户本地时间：{(parsed_data['start_time'] + timedelta(minutes=timezone_offset)).strftime('%Y-%m-%dT%H:%M:%S')}")
+        print(f"   使用城市 ID: {city_location_id}")
+        print(f"   天气信息：{weather_info}")
         print("=" * 60)
         
         return jsonify({

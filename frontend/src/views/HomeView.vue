@@ -233,6 +233,20 @@ function formatDate(isoString, format = 'time') {
   return date.toLocaleString('zh-CN')
 }
 
+function isPastSchedule(isoString) {
+  if (!isoString) return false
+  const scheduleDate = new Date(isoString)
+  const now = new Date()
+  
+  // 比较日期（忽略时间）
+  const scheduleDateOnly = new Date(scheduleDate.getFullYear(), scheduleDate.getMonth(), scheduleDate.getDate())
+  const nowDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  
+  return scheduleDateOnly < nowDateOnly
+}
+
+
+
 function getTimezoneInfo() {
   const now = new Date()
   const timezoneOffset = -now.getTimezoneOffset()
@@ -798,6 +812,12 @@ onUnmounted(() => {
                     <p v-if="schedule.content">{{ schedule.content }}</p>
                     <div v-if="schedule.weather_info" class="item-weather">
                       {{ schedule.weather_info }}
+                      <span v-if="isPastSchedule(schedule.start_time)" class="expired-tag">
+                        (已过期)
+                      </span>
+                    </div>
+                    <div v-else-if="isPastSchedule(schedule.start_time)" class="item-weather expired">
+                      已过期
                     </div>
                     <div v-if="schedule.priority >= 4" class="item-priority priority-high">
                       🔴 高优先级
@@ -2498,6 +2518,30 @@ input:checked + .slider:before {
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   display: inline-block;
+}
+
+.item-weather {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  background-color: #e3f2fd;
+  color: #1976d2;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.item-weather.expired {
+  background-color: #ffebee;
+  color: #c62828;
+  font-style: italic;
+}
+
+.expired-tag {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  color: #ff9800;
+  font-weight: 600;
+  font-style: italic;
 }
 /* ----------------------------- */
 .form-overlay {
