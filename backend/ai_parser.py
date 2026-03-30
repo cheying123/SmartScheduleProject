@@ -49,17 +49,20 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
     tomorrow = now + timedelta(days=1)
     day_after_tomorrow = now + timedelta(days=2)
     
-    # 计算下一个星期一的日期
+     # 计算下一个星期一的日期（下周的周一）
     days_until_monday = (7 - now.weekday()) % 7
     if days_until_monday == 0:
         days_until_monday = 7  # 如果今天是周一，"下周一"是下周
     next_monday = now + timedelta(days=days_until_monday)
     
-    # 计算下一个星期三的日期
-    days_until_wednesday = (2 - now.weekday()) % 7
-    if days_until_wednesday == 0:
-        days_until_wednesday = 7
-    next_wednesday = now + timedelta(days=days_until_wednesday)
+    # 计算下周三：先找到下周一，然后 +2 天
+    next_wednesday = next_monday + timedelta(days=2)
+    
+    # 计算本周三作为对比
+    this_wednesday = now - timedelta(days=(now.weekday() - 2) % 7)
+    
+    # 计算下周五：先找到下周一，然后 +4 天
+    next_friday = next_monday + timedelta(days=4)
 
     # 构建提示词 - 添加当前日期信息
     prompt = f"""
@@ -71,44 +74,57 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
 
 用户输入："{text}"
 
+⚠️⚠️⚠️ 【特别注意 - "这"vs"下"的区别】⚠️⚠️⚠️
+这是最重要的规则，必须严格遵守：
+- "这周三" = 本周的星期三（可能是今天或已经过去）
+- "下周三" = 下周的星期三（一定是未来的日期）
+- 如果今天是周三，"下周三" = 7 天后的周三，NOT 今天！
+
+【日期计算参考 - 必须使用这些具体日期】
+- 今天：{now.strftime('%Y年%m月%d日')} ({current_weekday})
+- 明天：{tomorrow.strftime('%Y年%m月%d日')} ({weekday_map[tomorrow.weekday()]})
+- 后天：{day_after_tomorrow.strftime('%Y年%m月%d日')} ({weekday_map[day_after_tomorrow.weekday()]})
+- 这周一：{(now - timedelta(days=(now.weekday() - 0) % 7)).strftime('%Y年%m月%d日')}
+- 这周三：{this_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[this_wednesday.weekday()]})
+- 这周五：{(now - timedelta(days=(now.weekday() - 4) % 7)).strftime('%Y年%m月%d日')}
+- 下周一：{next_monday.strftime('%Y年%m月%d日')} ({weekday_map[next_monday.weekday()]}) ⭐ 下周
+- 下周三：{next_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[next_wednesday.weekday()]}) ⭐ 下周
+- 下周五：{next_friday.strftime('%Y年%m月%d日')} ({weekday_map[next_friday.weekday()]}) ⭐ 下周
+
 请提取以下字段：
 - title: 日程标题（必填，简洁明了）
 - content: 日程详细内容（可选）
-- start_time: 开始时间（ISO 8601 格式，如：2024-01-15T14:00:00）
+- start_time: 开始时间（ISO 8601 格式，如：2024-01-15T14:00:00）⭐必须是未来时间
 - end_time: 结束时间（ISO 8601 格式，可选）
 - is_recurring: 是否重复（布尔值）
 - recurring_pattern: 重复模式（daily/weekly/monthly，仅在重复时填写）
 - priority: 优先级（1-5 的整数，1 为普通，5 为非常重要）
 - tags: 标签数组（可选）
 
-- 今天：{now.strftime('%Y年%m月%d日')} ({current_weekday})
-- 明天：{tomorrow.strftime('%Y年%m月%d日')} ({weekday_map[tomorrow.weekday()]})
-- 后天：{day_after_tomorrow.strftime('%Y年%m月%d日')} ({weekday_map[day_after_tomorrow.weekday()]})
-- 下周一：{next_monday.strftime('%Y年%m月%d日')} ({weekday_map[next_monday.weekday()]})
-- 下周三：{next_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[next_wednesday.weekday()]})
-
-
-
 【时间转换规则 - 必须严格遵守】
-1. 必须根据上面提供的【日期计算参考】来转换相对时间
-2. 具体计算方法：
-   - "明天" = {tomorrow.strftime('%Y年%m月%d日')}
-   - "后天" = {day_after_tomorrow.strftime('%Y年%m月%d日')}
-   - "下周一" = {next_monday.strftime('%Y年%m月%d日')}（注意：不是本周一，是下周一）
-   - "下周三" = {next_wednesday.strftime('%Y年%m月%d日')}
-   - "这周五" = 本周五，如果今天是周五之后则是下周五
-   - "上午 9 点" = 09:00
-   - "早上 6 点" = 06:00
-   - "下午 2 点" = 14:00
-   - "晚上 8 点" = 20:00
-3. 如果只说了时间没有说日期，默认是今天
-4. 所有时间必须转换为 ISO 8601 格式：YYYY-MM-DDTHH:MM:SS
-5. 返回的时间是用户本地时区的时间（{timezone_str}）
-6. 如果某些字段无法确定，可以留空或使用默认值
-7. 只返回 JSON 对象，不要有其他说明文字
+1. ⭐⭐⭐ 看到"下 X"时，必须使用上面【日期计算参考】中标记⭐的"下周 X"日期
+2. "下周三" = {next_wednesday.strftime('%Y年%m月%d日')}，绝对不是 {this_wednesday.strftime('%Y年%m月%d日')}！
+3. "这周三" = {this_wednesday.strftime('%Y年%m月%d日')}
+4. 如果只说"周三"且今天是周三之前，用"这周三"；如果今天是周三之后，用"下周三"
+5. "上午 9 点" = 09:00
+6. "早上 6 点" = 06:00
+7. "下午 2 点" = 14:00
+8. "晚上 8 点" = 20:00
+9. 所有时间必须转换为 ISO 8601 格式：YYYY-MM-DDTHH:MM:SS
+10. 返回的时间是用户本地时区的时间（{timezone_str}）
+11. ⭐ 开始时间必须是将来的时间，不能是过去的时间
+12. 只返回 JSON 对象，不要有其他说明文字
 
 【示例 - 基于今天的实际日期】
 假设今天是 {now.strftime('%Y年%m月%d日')} ({current_weekday})，用户在 {timezone_str} 时区：
+
+❌ 错误示例（如果把"下周三"理解成"这周三"）：
+用户说："下周三下午两点开会"
+错误回答：{{"start_time": "{this_wednesday.strftime('%Y-%m-%d')}T14:00:00"}}  ← 这是这周三，不是下周三！
+
+✅ 正确示例：
+用户说："下周三下午两点开会"
+正确答案：{{"start_time": "{next_wednesday.strftime('%Y-%m-%d')}T14:00:00"}}  ← 这才是下周三！
 
 用户说："明天早上 9 点与客户见面"
 明天的日期是：{tomorrow.strftime('%Y年%m月%d日')}
@@ -124,7 +140,7 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
 }}
 
 用户说："下周一早上 6 点叫我起床"
-下周一的日期是：{next_monday.strftime('%Y年%m月%d日')}
+下周一的日期是：{next_monday.strftime('%Y年%m月%d日')} ⭐注意：不是本周一！
 {{
     "title": "叫起床",
     "content": "",
@@ -134,6 +150,19 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
     "recurring_pattern": null,
     "priority": 1,
     "tags": []
+}}
+
+用户说："这周三下午三点面试"
+这周三的日期是：{this_wednesday.strftime('%Y年%m月%d日')}
+{{
+    "title": "面试",
+    "content": "技术面试",
+    "start_time": "{this_wednesday.strftime('%Y-%m-%d')}T15:00:00",
+    "end_time": "{this_wednesday.strftime('%Y-%m-%d')}T16:00:00",
+    "is_recurring": false,
+    "recurring_pattern": null,
+    "priority": 4,
+    "tags": ["工作", "面试"]
 }}
 """
 
@@ -146,9 +175,9 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
         print(f"📅 当前日期：{current_date_str} ({current_weekday})")
         print(f"📆 日期参考:")
         print(f"   今天：{now.strftime('%Y年%m月%d日')} ({current_weekday})")
-        print(f"   明天：{tomorrow.strftime('%Y年%m月%d日')} ({weekday_map[tomorrow.weekday()]})")
-        print(f"   下周一：{next_monday.strftime('%Y年%m月%d日')} ({weekday_map[next_monday.weekday()]})")
-        print(f"   下周三：{next_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[next_wednesday.weekday()]})")
+        print(f"   这周三：{this_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[this_wednesday.weekday()]})")
+        print(f"   下周三：{next_wednesday.strftime('%Y年%m月%d日')} ({weekday_map[next_wednesday.weekday()]}) ⭐关键")
+        print(f"   下周一：{next_monday.strftime('%Y年%m月%d日')} ({weekday_map[next_monday.weekday()]}) ⭐关键")
         print("-" * 60)
         
         # 调用 AI API
@@ -163,7 +192,7 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
                 'messages': [
                     {
                         'role': 'system',
-                        'content': f'你是一个专业的日程助手，擅长从自然语言中提取结构化的日程信息。你会根据用户提供的具体日期计算参考，准确地将相对时间（如"明天"、"下周一"）转换为正确的日期。'
+                        'content': '你是一个专业的日程助手，擅长从自然语言中提取结构化的日程信息。你会根据用户提供的具体日期计算参考，准确地将相对时间（如"明天"、"下周一"）转换为正确的日期。特别注意"这"和"下"的区别！'
                     },
                     {
                         'role': 'user',
@@ -172,15 +201,16 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
                 ]
             },
             'parameters': {
-                'temperature': 0.1,  # 降低温度，让输出更精确
-                'max_tokens': 500
+                'temperature': 0.05,  # 进一步降低温度，让输出更精确
+                'max_tokens': 500,
+                'seed': 42  # 固定随机种子，提高一致性
             }
         }
         
         print("📤 发送到 AI 的请求内容:")
         print(f"   URL: {AI_API_URL}")
         print(f"   Model: {AI_MODEL}")
-        print(f"   Temperature: 0.1 (更精确)")
+        print(f"   Temperature: 0.05 (非常精确)")
         print(f"   User Prompt (前 500 字符): {prompt[:500]}...")
         print("-" * 60)
         
@@ -199,58 +229,90 @@ def parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
             print("-" * 60)
             
             # 解析 AI 返回的结果
-            ai_output = result.get('output', {}).get('text', '')
-            print(f"📄 AI 返回的原始文本:\n{ai_output}")
-            print("-" * 60)
+            ai_text = result.get('output', {}).get('text', '')
             
-            # 清理输出，提取 JSON 部分
-            json_start = ai_output.find('{')
-            json_end = ai_output.rfind('}') + 1
+            # 清理 JSON 字符串（移除 Markdown 标记）
+            ai_text = ai_text.strip()
+            if ai_text.startswith('```json'):
+                ai_text = ai_text[7:]
+            if ai_text.endswith('```'):
+                ai_text = ai_text[:-3]
+            ai_text = ai_text.strip()
             
-            if json_start >= 0 and json_end > json_start:
-                json_str = ai_output[json_start:json_end]
-                print(f"🔍 提取到的 JSON 字符串:\n{json_str}")
+            print(f"🧹 清理后的 JSON 文本:\n{ai_text}\n")
+            
+            try:
+                parsed_data = json.loads(ai_text)
                 
-                parsed_data = json.loads(json_str)
+                # ⭐⭐⭐ 添加时间验证和自动修正 ⭐⭐⭐
+                if 'start_time' in parsed_data:
+                    try:
+                        start_dt = datetime.datetime.fromisoformat(parsed_data['start_time'].replace('Z', ''))
+                        
+                        # 检查是否是过去的时间（允许 1 小时误差）
+                        if start_dt < now - timedelta(hours=1):
+                            print(f"⚠️ 警告：AI 返回的时间 {start_dt} 是过去的时间！")
+                            print(f"   当前时间：{now}")
+                            print(f"   相差：{now - start_dt}")
+                            
+                            # 尝试修正：如果是"下 X"但返回了"这 X"的时间，加 7 天修正
+                            if '下' in text and (now - start_dt).days >= 6:
+                                print(f"🔧 检测到可能是'下周'被误解，尝试 +7 天修正...")
+                                start_dt += timedelta(days=7)
+                                parsed_data['start_time'] = start_dt.isoformat()
+                                
+                                if parsed_data.get('end_time'):
+                                    end_dt = datetime.datetime.fromisoformat(parsed_data['end_time'].replace('Z', ''))
+                                    end_dt += timedelta(days=7)
+                                    parsed_data['end_time'] = end_dt.isoformat()
+                                    
+                                print(f"✅ 修正后的时间：{start_dt}")
+                        
+                        # 转换为 UTC 存储（减去时区偏移）
+                        utc_start = start_dt - timedelta(minutes=timezone_offset_minutes)
+                        parsed_data['start_time'] = utc_start
+                        
+                        if parsed_data.get('end_time'):
+                            utc_end = datetime.datetime.fromisoformat(parsed_data['end_time'].replace('Z', ''))
+                            utc_end = utc_end - timedelta(minutes=timezone_offset_minutes)
+                            parsed_data['end_time'] = utc_end
+                        
+                        print(f"✅ 时间验证通过:")
+                        print(f"   原始本地时间：{start_dt}")
+                        print(f"   转换后 UTC 时间：{utc_start}")
+                        
+                    except Exception as e:
+                        print(f"⚠️ 时间解析或验证失败：{e}")
+                        import traceback
+                        traceback.print_exc()
                 
-                print("-" * 60)
-                print("📋 AI 解析的原始数据（用户本地时间）:")
-                print(json.dumps(parsed_data, ensure_ascii=False, indent=2))
-                print("-" * 60)
-                
-                # 验证和补充必要字段，并转换为 UTC
-                final_result = validate_and_normalize(parsed_data, timezone_offset_minutes)
-                
-                print("✅ 标准化后的最终结果（已转换为 UTC）:")
-                print(json.dumps({
-                    'title': final_result['title'],
-                    'content': final_result['content'],
-                    'start_time': final_result['start_time'].isoformat() if final_result['start_time'] else None,
-                    'end_time': final_result['end_time'].isoformat() if final_result['end_time'] else None,
-                    'is_recurring': final_result['is_recurring'],
-                    'recurring_pattern': final_result['recurring_pattern'],
-                    'priority': final_result['priority'],
-                    'tags': final_result['tags']
-                }, ensure_ascii=False, indent=2))
+                print(f"✅ AI 解析成功:")
+                print(f"   标题：{parsed_data.get('title', 'N/A')}")
+                print(f"   开始时间：{parsed_data.get('start_time', 'N/A')}")
+                print(f"   结束时间：{parsed_data.get('end_time', 'N/A')}")
+                print(f"   重复：{parsed_data.get('is_recurring', False)}")
+                print(f"   优先级：{parsed_data.get('priority', 1)}")
                 print("=" * 60)
-                print("✨ AI 解析完成\n")
                 
-                return final_result
-            else:
-                print(f"❌ AI 返回格式异常，未找到 JSON 对象：{ai_output}")
-                print("=" * 60)
+                return parsed_data
+                
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON 解析失败：{e}")
+                print(f"原始文本：{ai_text}")
+                return None   
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON 解析失败：{e}")
+                print(f"原始文本：{ai_text}")
                 return None
         else:
-            print(f"❌ AI API 请求失败：{response.status_code}")
+            print(f"❌ AI API 请求失败 - 状态码：{response.status_code}")
             print(f"响应内容：{response.text}")
-            print("=" * 60)
             return None
             
     except Exception as e:
         print(f"❌ AI 解析异常：{e}")
         import traceback
-        print(traceback.format_exc())
-        print("=" * 60)
+        traceback.print_exc()
         return None
 
 def validate_and_normalize(data: dict, timezone_offset_minutes: int = 480) -> dict:

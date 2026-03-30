@@ -502,6 +502,17 @@ async function loadRecommendations() {
   }
 }
 
+function clearNotifications() {
+  recommendations.value = []
+  showRecommendations.value = false
+}
+
+function switchToNotifications() {
+  activeTab.value = 'notifications'
+  clearNotifications()
+}
+
+
 function acceptConflictSolution(conflictData) {
   showConflictResolution.value = false
   conflictDialog.value = null
@@ -739,7 +750,7 @@ onUnmounted(() => {
           href="#" 
           class="nav-item" 
           :class="{ 'active': activeTab === 'notifications' }"
-          @click.prevent="activeTab = 'notifications'"
+          @click.prevent="switchToNotifications"
         >
           <Bell :size="20" />
           <span v-if="!isSidebarCollapsed">消息通知</span>
