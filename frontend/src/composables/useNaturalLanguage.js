@@ -13,7 +13,7 @@ import { formatRecordingTime } from '@/utils/timeUtils'
  * @param {string} API_URL - API 基础地址
  * @returns {Object} 自然语言输入相关的方法和状态
  */
-export function useNaturalLanguage(API_URL) {
+export function useNaturalLanguage(API_URL, fetchSchedules) {
   // 状态
   const isNaturalLanguageMode = ref(false)
   const naturalLanguageInput = ref('')
@@ -40,24 +40,19 @@ export function useNaturalLanguage(API_URL) {
     isProcessingNL.value = true
     
     try {
-      // 计算时区字符串
-      const timezoneHours = Math.floor(Math.abs(timezoneOffset) / 60)
-      const timezoneMinutes = Math.abs(timezoneOffset) % 60
-      const sign = timezoneOffset >= 0 ? '+' : '-'
-      const timezoneStr = `UTC${sign}${timezoneHours}:${String(timezoneMinutes).padStart(2, '0')}`
-      
-      // 调用后端 API
       const response = await axios.post(`${API_URL}/schedules/natural-language`, {
         text: naturalLanguageInput.value,
-        timezone: timezoneStr,
         timezone_offset: timezoneOffset
       })
       
-      // 清空输入
       naturalLanguageInput.value = ''
       isNaturalLanguageMode.value = false
       
-      // 显示成功消息
+      // 刷新日程列表（和传统表单创建使用同样的方法）
+      if (fetchSchedules) {
+        await fetchSchedules()
+      }
+      
       if (response.data.ai_parsed) {
         alert(`✨ AI 智能解析成功！日程已创建：${response.data.schedule.title}`)
       } else {
@@ -66,21 +61,55 @@ export function useNaturalLanguage(API_URL) {
       
       return { success: true, data: response.data }
     } catch (error) {
-      // 处理冲突情况
       if (error.response?.status === 409) {
-        conflictDialog.value = error.response.data
-        return { 
-          success: false, 
-          type: 'conflict', 
-          data: error.response.data 
+        const conflictData = error.response.data
+        
+        let conflictMsg = `⚠️ 检测到日程冲突！\n\n`
+        conflictMsg += `您想创建：${conflictData.parsed_data?.title || '新日程'}\n`
+        conflictMsg += `时间：${conflictData.parsed_data?.start_time || '未知'}\n\n`
+        conflictMsg += `但与以下已有日程冲突：\n`
+        
+        conflictData.conflicts?.forEach((conflict, index) => {
+          conflictMsg += `\n${index + 1}. ${conflict.title}\n`
+          conflictMsg += `   时间：${conflict.start_time} - ${conflict.end_time || '未设置'}\n`
+        })
+        
+        conflictMsg += `\n您确定还要创建吗？`
+        
+        // 先重置处理状态
+        isProcessingNL.value = false
+        
+        if (confirm(conflictMsg)) {
+          conflictDialog.value = conflictData
+          return { 
+            success: false, 
+            type: 'conflict', 
+            data: conflictData 
+          }
+        } else {
+          // 用户取消，关闭对话框并清空输入
+          conflictDialog.value = null
+          naturalLanguageInput.value = ''
+          isNaturalLanguageMode.value = false
+          return { 
+            success: false, 
+            type: 'conflict_cancelled' 
+          }
         }
       } else {
-        alert('解析失败，请重试')
+        // 其他错误也要重置状态
+        isProcessingNL.value = false
+        
+        const errorMsg = error.response?.data?.error || error.message || '解析失败，请重试'
+        alert(`❌ 错误：${errorMsg}`)
         console.error(error)
         return { success: false, type: 'error', error }
       }
     } finally {
-      isProcessingNL.value = false
+      // 确保在 try-catch 之外也重置（成功的情况）
+      if (isProcessingNL.value) {
+        isProcessingNL.value = false
+      }
     }
   }
 
@@ -89,7 +118,6 @@ export function useNaturalLanguage(API_URL) {
    * @returns {SpeechRecognition|null} 语音识别实例
    */
   function startVoiceInput() {
-    // 检查浏览器支持
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       alert('您的浏览器不支持语音识别，请使用 Chrome、Edge 或其他基于 Chromium 的浏览器')
       return null
@@ -98,13 +126,11 @@ export function useNaturalLanguage(API_URL) {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     const recognition = new SpeechRecognition()
     
-    // 配置参数
     recognition.lang = VOICE_RECOGNITION.LANG
     recognition.continuous = VOICE_RECOGNITION.CONTINUOUS
     recognition.interimResults = VOICE_RECOGNITION.INTERIM_RESULTS
     recognition.maxAlternatives = VOICE_RECOGNITION.MAX_ALTERNATIVES
     
-    // 开始录音回调
     recognition.onstart = () => {
       console.log('语音识别已启动')
       isRecording.value = true
@@ -119,7 +145,6 @@ export function useNaturalLanguage(API_URL) {
       }, 1000)
     }
     
-    // 结束录音回调
     recognition.onend = () => {
       console.log('语音识别已结束')
       isRecording.value = false
@@ -130,14 +155,12 @@ export function useNaturalLanguage(API_URL) {
       }
     }
     
-    // 识别结果回调
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript
       naturalLanguageInput.value = transcript
       console.log('识别结果:', transcript)
     }
     
-    // 错误处理
     recognition.onerror = (event) => {
       console.error('语音识别错误:', event.error)
       
@@ -201,7 +224,6 @@ export function useNaturalLanguage(API_URL) {
     naturalLanguageInput.value = ''
   }
 
-  // 组件卸载时清理定时器
   onUnmounted(() => {
     if (recordingTimer.value) {
       clearInterval(recordingTimer.value)

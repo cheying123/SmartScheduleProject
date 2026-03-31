@@ -1,15 +1,15 @@
-# NEW_FILE_CODE
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 from extensions import db
 from models.schedule import Schedule
 from models.user import User
 from utils.jwt_utils import token_required
-from services.weather_service import get_weather_for_date
+from services.weather_service import get_weather_for_date, get_weather_with_alerts
 from services.nlp_parser import parse_natural_language
 from services.conflict_detector import detect_schedule_conflicts
 
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
+
 
 @schedules_bp.route('', methods=['GET'])
 @token_required
@@ -17,23 +17,52 @@ def get_schedules(current_user):
     """获取当前用户的所有日程"""
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.start_time.asc()).all()
     
-    # 自动更新天气信息
     today = datetime.now().strftime('%Y-%m-%d')
     max_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-    city_location_id = current_user.location or "101010100"
     
+    city_location_id = current_user.location or "101010100"
+    needs_update = False
+    
+    # 检查是否需要更新天气（未来 7 天内没有天气信息的日程）
     for schedule in schedules:
         schedule_date = schedule.start_time.strftime('%Y-%m-%d')
+        if today <= schedule_date <= max_date and not schedule.weather_info:
+            needs_update = True
+            break
+    
+    if needs_update:
+        print(f"🌤️ 开始更新天气信息...")
+        for schedule in schedules:
+            schedule_date = schedule.start_time.strftime('%Y-%m-%d')
+            if today <= schedule_date <= max_date:
+                try:
+                    weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                    if weather_result:
+                        schedule.weather_info = weather_result['weather_text']
+                        print(f"✓ 已更新 {schedule_date} 的天气")
+                except Exception as e:
+                    print(f"✗ 更新天气失败 {schedule_date}: {e}")
+        
+        db.session.commit()
+    
+    schedule_list = []
+    for schedule in schedules:
+        schedule_dict = schedule.to_dict()
+        schedule_date = schedule.start_time.strftime('%Y-%m-%d')
+        
+        # 为未来 7 天内的日程添加天气提醒
         if today <= schedule_date <= max_date:
             try:
-                weather_info = get_weather_for_date(city_location_id, schedule_date)
-                if weather_info:
-                    schedule.weather_info = weather_info
-            except Exception as e:
-                print(f"更新天气失败 {schedule_date}: {e}")
+                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                if weather_result and weather_result.get('alerts'):
+                    schedule_dict['weather_alerts'] = weather_result['alerts']
+            except:
+                pass
+        
+        schedule_list.append(schedule_dict)
     
-    db.session.commit()
-    return jsonify([s.to_dict() for s in schedules])
+    return jsonify(schedule_list)
+
 
 
 @schedules_bp.route('', methods=['POST'])
@@ -49,24 +78,42 @@ def create_schedule(current_user):
         local_dt = datetime.fromisoformat(data['start_time'].replace('Z', ''))
         schedule_date = local_dt.strftime('%Y-%m-%d')
         
-        city_location_id = current_user.location or "101010100"
-        weather_info = get_weather_for_date(city_location_id, schedule_date)
-        
         new_schedule = Schedule(
             user_id=current_user.id,
             title=data['title'],
             content=data.get('content', ''),
             start_time=local_dt,
             end_time=datetime.fromisoformat(data['end_time'].replace('Z', '')) if data.get('end_time') else None,
-            weather_info=weather_info,
+            weather_info=None,
             priority=data.get('priority', 1),
             is_recurring=data.get('is_recurring', False),
             recurring_pattern=data.get('recurring_pattern'),
             tags=data.get('tags')
         )
         db.session.add(new_schedule)
-        db.session.commit()
         
+        # 如果是未来 7 天内的日程，立即更新天气（包括智能提醒）
+        today = datetime.now().strftime('%Y-%m-%d')
+        target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+        today_date = datetime.strptime(today, '%Y-%m-%d')
+        days_diff = (target_date - today_date).days
+        
+        # 获取未来 7 天内（包括今天）的天气预报和智能提醒
+        if 0 <= days_diff <= 7:
+            city_location_id = current_user.location or "101010100"
+            try:
+                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                if weather_result:
+                    # 存储完整天气信息（包括提醒）
+                    new_schedule.weather_info = weather_result['weather_text']
+                    print(f"✓ 更新天气成功：{schedule_date} (未来第{days_diff}天)")
+                    print(f"   天气：{weather_result['weather_text']}")
+                    if weather_result.get('alerts'):
+                        print(f"   提醒数量：{len(weather_result['alerts'])}")
+            except Exception as e:
+                print(f"✗ 更新天气失败 {schedule_date}: {e}")
+        
+        db.session.commit()
         return jsonify(new_schedule.to_dict()), 201
         
     except ValueError as e:
@@ -74,7 +121,7 @@ def create_schedule(current_user):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
-
+        return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
 
 @schedules_bp.route('/<int:id>', methods=['PUT'])
 @token_required
@@ -117,8 +164,24 @@ def update_schedule(current_user, id):
             
             schedule.start_time = local_dt
             schedule.end_time = end_time
+            
             schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-            schedule.weather_info = get_weather_for_date(city_location_id, schedule_date)
+            
+            # 计算日期差，判断是否在未来 7 天内
+            today = datetime.now().strftime('%Y-%m-%d')
+            target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+            today_date = datetime.strptime(today, '%Y-%m-%d')
+            days_diff = (target_date - today_date).days
+            
+            # 如果是未来 7 天内的日程，更新天气（包括智能提醒）
+            if 0 <= days_diff <= 7:
+                try:
+                    weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                    if weather_result:
+                        schedule.weather_info = weather_result['weather_text']
+                        print(f"✓ 更新天气成功：{schedule_date} (未来第{days_diff}天)")
+                except Exception as e:
+                    print(f"✗ 更新天气失败 {schedule_date}: {e}")
         
         if 'title' in data:
             schedule.title = data['title']
@@ -142,7 +205,6 @@ def update_schedule(current_user, id):
         db.session.rollback()
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
 
-
 @schedules_bp.route('/<int:id>', methods=['DELETE'])
 @token_required
 def delete_schedule(current_user, id):
@@ -159,6 +221,9 @@ def delete_schedule(current_user, id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': '服务器内部错误'}), 500
+    
+
+
 
 
 @schedules_bp.route('/natural-language', methods=['POST'])
@@ -207,7 +272,25 @@ def create_schedule_natural(current_user):
         
         local_date = (parsed_data['start_time'] + timedelta(minutes=timezone_offset)).strftime('%Y-%m-%d')
         city_location_id = current_user.location or "101010100"
-        weather_info = get_weather_for_date(city_location_id, local_date)
+        
+        # 计算日期差，判断是否在未来 7 天内
+        today = datetime.now().strftime('%Y-%m-%d')
+        target_date = datetime.strptime(local_date, '%Y-%m-%d')
+        today_date = datetime.strptime(today, '%Y-%m-%d')
+        days_diff = (target_date - today_date).days
+        
+        # 如果是未来 7 天内，获取完整天气信息（包括智能提醒）
+        weather_info = None
+        if 0 <= days_diff <= 7:
+            try:
+                weather_result = get_weather_with_alerts(city_location_id, local_date)
+                if weather_result:
+                    weather_info = weather_result['weather_text']
+                    print(f"✓ 自然语言创建 - 天气：{weather_result['weather_text']}")
+                    if weather_result.get('alerts'):
+                        print(f"   提醒数量：{len(weather_result['alerts'])}")
+            except Exception as e:
+                print(f"✗ 获取天气失败 {local_date}: {e}")
         
         new_schedule = Schedule(
             user_id=current_user.id,
@@ -237,7 +320,6 @@ def create_schedule_natural(current_user):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'解析失败：{str(e)}'}), 500
-
 
 @schedules_bp.route('/check-conflict', methods=['POST'])
 @token_required

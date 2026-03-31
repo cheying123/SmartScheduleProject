@@ -22,13 +22,10 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     
-    # CORS 配置
+        # CORS 配置 - 只允许一个 origin，避免重复
     cors.init_app(
         app, 
-        resources={r"/api/*": {"origins": [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173"
-        ]}}, 
+        resources={r"/api/*": {"origins": "*"}}, 
         supports_credentials=True,
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Requested-With"]

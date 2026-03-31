@@ -37,13 +37,64 @@ const {
   newSchedule,
   editForm,
   fetchSchedules,
-  addSchedule,
+  addSchedule: originalAddSchedule,  // ← 注意这里要重命名
   deleteSchedule,
   openEditModal,
   closeEditModal,
   saveEdit,
   resetScheduleForm
-} = useSchedule(userStore)
+} = useSchedule(userStore, API_URL)
+
+// 包装 addSchedule，成功后关闭模态框并显示通知
+async function addSchedule() {
+  console.log('📝 开始创建日程...')
+  
+  try {
+    const success = await originalAddSchedule()
+    console.log('✅ 创建结果:', success)
+    
+    // 先立即关闭模态框
+    isFormVisible.value = false
+    
+    // 重置表单
+    setTimeout(() => {
+      resetScheduleForm()
+    }, 100)
+    
+    // 显示通知
+    if (success) {
+      showNotification('success', '✅ 日程创建成功！')
+    } else {
+      showNotification('error', '❌ 创建失败，请重试')
+    }
+    
+  } catch (err) {
+    console.error('创建失败:', err)
+    
+    // 即使出错也关闭模态框
+    isFormVisible.value = false
+    
+    // 显示错误信息
+    const errorMsg = err.response?.data?.error || err.message || '未知错误'
+    showNotification('error', `❌ 创建失败：${errorMsg}`)
+  }
+}
+
+// 显示通知的辅助函数
+function showNotification(type, message, duration = 3000) {
+  notification.value = {
+    show: true,
+    type,
+    message,
+    duration
+  }
+  
+  // 自动关闭
+  setTimeout(() => {
+    notification.value.show = false
+  }, duration)
+}
+
 
 const {
   isNaturalLanguageMode,
@@ -57,7 +108,28 @@ const {
   startVoiceInput,
   stopRecording,
   handleCancelClick
-} = useNaturalLanguage(API_URL)
+} = useNaturalLanguage(API_URL, fetchSchedules)
+
+// 强制创建日程（忽略冲突）
+async function forceCreateSchedule() {
+  if (!conflictDialog.value?.parsed_data) {
+    return
+  }
+  
+  try {
+    // 关闭冲突对话框
+    conflictDialog.value = null
+    
+    // TODO: 调用后端 API 强制创建（需要后端支持）
+    // 或者提示用户修改时间
+    
+    alert('功能开发中：您可以先手动调整时间，或者联系开发者添加"强制创建"功能')
+    
+  } catch (error) {
+    console.error('强制创建失败:', error)
+    alert('创建失败，请重试')
+  }
+}
 
 const {
   isProfileEditModalVisible,
@@ -83,6 +155,12 @@ const currentTimezone = ref('')
 const isLogoutModalVisible = ref(false)
 const createMode = ref(CREATE_MODES.FORM)
 const isFormVisible = ref(false)
+const notification = ref({  // ← 新增：通知状态
+  show: false,
+  type: 'success', // 'success' | 'error'
+  message: '',
+  duration: 3000
+})
 
 // 计算属性
 const groupedSchedules = computed(() => {
@@ -340,6 +418,64 @@ onUnmounted(() => {
         </div>
       </div>
     </transition>
+    <!-- 通知提示 -->
+    <transition name="slide-fade">
+      <div v-if="notification.show" class="notification-toast" :class="notification.type">
+        <div class="notification-content">
+          <span class="notification-icon">
+            {{ notification.type === 'success' ? '✓' : '✕' }}
+          </span>
+          <span class="notification-message">{{ notification.message }}</span>
+        </div>
+        <div class="notification-progress"></div>
+      </div>
+    </transition>
+
+    <!-- 冲突确认对话框 -->
+    <transition name="fade">
+      <div v-if="conflictDialog" class="form-overlay" @click.self="conflictDialog = null">
+        <div class="form-container conflict-dialog">
+          <h2>⚠️ 日程冲突提醒</h2>
+          
+          <div class="conflict-info">
+            <div class="new-schedule">
+              <h4>您想创建的日程：</h4>
+              <p class="schedule-title">{{ conflictDialog.parsed_data?.title }}</p>
+              <p class="schedule-time">
+                📅 {{ conflictDialog.parsed_data?.start_time }}
+                <span v-if="conflictDialog.parsed_data?.end_time">
+                  - {{ conflictDialog.parsed_data?.end_time }}
+                </span>
+              </p>
+            </div>
+            
+            <div class="existing-conflicts">
+              <h4>与以下日程冲突：</h4>
+              <div 
+                v-for="(conflict, index) in conflictDialog.conflicts" 
+                :key="index"
+                class="conflict-item"
+              >
+                <div class="conflict-header">
+                  <span class="conflict-icon">⛔</span>
+                  <strong>{{ conflict.title }}</strong>
+                </div>
+                <div class="conflict-time">
+                  🕐 {{ conflict.start_time }} - {{ conflict.end_time || '未设置结束时间' }}
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="form-actions">
+            <button type="button" class="btn-cancel" @click="conflictDialog = null">取消</button>
+            <button type="button" class="btn-submit btn-force-create" @click="forceCreateSchedule">
+              仍然创建
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -546,12 +682,197 @@ onUnmounted(() => {
   text-align: center;
 }
 
+/* ===== 冲突对话框样式 ===== */
+.conflict-dialog {
+  max-width: 600px;
+}
+
+.conflict-info {
+  margin: 1.5rem 0;
+}
+
+.new-schedule {
+  background-color: #e3f2fd;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.new-schedule h4 {
+  margin: 0 0 0.5rem 0;
+  color: #1976d2;
+  font-size: 0.95rem;
+}
+
+.schedule-title {
+  margin: 0.25rem 0;
+  font-weight: 600;
+  color: #32325D;
+  font-size: 1.1rem;
+}
+
+.schedule-time {
+  margin: 0.25rem 0;
+  color: #525F7F;
+  font-size: 0.9rem;
+}
+
+.existing-conflicts h4 {
+  margin: 0 0 0.75rem 0;
+  color: #dc3545;
+  font-size: 0.95rem;
+}
+
+.conflict-item {
+  background-color: #ffebee;
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  border-left: 3px solid #dc3545;
+}
+
+.conflict-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.conflict-icon {
+  font-size: 1.2rem;
+}
+
+.conflict-header strong {
+  color: #c62828;
+}
+
+.conflict-time {
+  font-size: 0.85rem;
+  color: #8898aa;
+  margin-left: 1.75rem;
+}
+
+.btn-force-create {
+  background-color: #ff9800;
+}
+
+.btn-force-create:hover {
+  background-color: #f57c00;
+}
+
 /* ===== 过渡动画 ===== */
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.3s ease;
 }
 
 .fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+
+/* ===== 通知提示样式 ===== */
+.notification-toast {
+  position: fixed;
+  top: 2rem;
+  right: 2rem;
+  min-width: 300px;
+  max-width: 500px;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 9999;
+  overflow: hidden;
+  animation: slide-in 0.3s ease-out;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.notification-toast.success {
+  background-color: #d4edda;
+  border-left: 4px solid #28a745;
+  color: #155724;
+}
+
+.notification-toast.error {
+  background-color: #f8d7da;
+  border-left: 4px solid #dc3545;
+  color: #721c24;
+}
+
+.notification-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.notification-icon {
+  font-size: 1.25rem;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.notification-message {
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.notification-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background-color: rgba(255, 255, 255, 0.5);
+  animation: progress linear;
+}
+
+.notification-toast.success .notification-progress {
+  animation-duration: 3s;
+}
+
+.notification-toast.error .notification-progress {
+  animation-duration: 5s;
+}
+
+@keyframes progress {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+/* ===== 滑出动画 ===== */
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-enter-from {
+  transform: translateX(400px);
+  opacity: 0;
+}
+
+.slide-fade-leave-to {
+  transform: translateX(400px);
   opacity: 0;
 }
 </style>

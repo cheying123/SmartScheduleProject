@@ -1,11 +1,16 @@
 <script setup>
-import { Edit2, Trash2 } from 'lucide-vue-next'
+import { Calendar, Clock, MapPin, Trash2, Edit2, Sun, Cloud, CloudRain, Umbrella } from 'lucide-vue-next'
+import WeatherAlertList from '@/components/common/WeatherAlertList.vue'
 import { formatDate, isPastSchedule } from '@/utils/timeUtils'
 
 const props = defineProps({
   schedule: {
     type: Object,
     required: true
+  },
+  showWeatherAlerts: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -36,9 +41,14 @@ function handleDelete() {
           (已过期)
         </span>
       </div>
-      <div v-else-if="isPastSchedule(schedule.start_time)" class="item-weather expired">
-        已过期
-      </div>
+      
+      <!-- 智能天气提醒 -->
+      <WeatherAlertList 
+        v-if="showWeatherAlerts && schedule.weather_alerts && schedule.weather_alerts.length > 0"
+        :alerts="schedule.weather_alerts"
+        :compact="true"
+        :max-visible="1"
+      />
       
       <!-- 优先级标签 -->
       <div v-if="schedule.priority >= 4" class="item-priority priority-high">
@@ -178,5 +188,9 @@ function handleDelete() {
 .action-btn-delete:hover {
   color: #f5365c;
   background-color: #fff5f5;
+}
+
+.item-content .weather-alerts-container {
+  margin-top: 0.5rem;
 }
 </style>

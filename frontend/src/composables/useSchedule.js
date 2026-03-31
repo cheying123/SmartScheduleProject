@@ -10,9 +10,10 @@ import { getCurrentDateTime, formatDateForInput } from '@/utils/timeUtils'
 /**
  * 日程管理组合式函数
  * @param {Object} userStore - Pinia 用户状态 store
+ * @param {string} API_URL - API 基础地址
  * @returns {Object} 日程管理相关的方法和状态
  */
-export function useSchedule(userStore) {
+export function useSchedule(userStore, API_URL) {
   // 状态
   const schedules = ref([])
   const isLoading = ref(false)
@@ -42,10 +43,9 @@ export function useSchedule(userStore) {
 
   /**
    * 获取日程列表
-   * @param {string} API_URL - API 基础地址
    * @returns {Promise<boolean>} 是否成功
    */
-  async function fetchSchedules(API_URL) {
+  async function fetchSchedules() {
     try {
       isLoading.value = true
       const response = await axios.get(`${API_URL}/schedules`)
@@ -75,10 +75,9 @@ export function useSchedule(userStore) {
 
   /**
    * 添加新日程
-   * @param {string} API_URL - API 基础地址
    * @returns {Promise<boolean>} 是否成功
    */
-  async function addSchedule(API_URL) {
+  async function addSchedule() {
     // 验证必填字段
     if (!newSchedule.value.title || !newSchedule.value.start_time) {
       alert('标题和开始时间不能为空！')
@@ -104,7 +103,7 @@ export function useSchedule(userStore) {
       newSchedule.value = defaultScheduleForm()
       
       // 重新加载列表
-      await fetchSchedules(API_URL)
+      await fetchSchedules()
       return true
     } catch (err) {
       alert('添加失败，请检查控制台信息。')
@@ -116,17 +115,16 @@ export function useSchedule(userStore) {
   /**
    * 删除日程
    * @param {number} id - 日程 ID
-   * @param {string} API_URL - API 基础地址
    * @returns {Promise<boolean>} 是否成功
    */
-  async function deleteSchedule(id, API_URL) {
+  async function deleteSchedule(id) {
     if (!confirm('确定要删除这个日程吗？')) {
       return false
     }
     
     try {
       await axios.delete(`${API_URL}/schedules/${id}`)
-      await fetchSchedules(API_URL)
+      await fetchSchedules()
       return true
     } catch (err) {
       alert('删除失败，请重试。')
@@ -177,10 +175,9 @@ export function useSchedule(userStore) {
 
   /**
    * 保存编辑的日程
-   * @param {string} API_URL - API 基础地址
    * @returns {Promise<boolean>} 是否成功
    */
-  async function saveEdit(API_URL) {
+  async function saveEdit() {
     // 验证必填字段
     if (!editForm.value.title || !editForm.value.start_time) {
       alert('标题和开始时间不能为空！')
@@ -202,7 +199,7 @@ export function useSchedule(userStore) {
       await axios.put(`${API_URL}/schedules/${editingSchedule.value.id}`, payload)
       
       closeEditModal()
-      await fetchSchedules(API_URL)
+      await fetchSchedules()
       return true
     } catch (err) {
       console.error('更新失败:', err)
