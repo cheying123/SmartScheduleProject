@@ -1,7 +1,7 @@
 <script setup>
-import { Calendar, Clock, MapPin, Trash2, Edit2, Sun, Cloud, CloudRain, Umbrella } from 'lucide-vue-next'
-import WeatherAlertList from '@/components/common/WeatherAlertList.vue'
-import { formatDate, isPastSchedule } from '@/utils/timeUtils'
+import { Edit2, Trash2, Clock, Sun, Check, Globe, MapPin } from 'lucide-vue-next'
+import WeatherAlertList from '../common/WeatherAlertList.vue'
+import CountdownDisplay from '../common/CountdownDisplay.vue'
 
 const props = defineProps({
   schedule: {
@@ -21,18 +21,48 @@ function handleEdit() {
 }
 
 function handleDelete() {
-  if (confirm('确定要删除这个日程吗？')) {
-    emit('delete', props.schedule.id)
-  }
+  emit('delete', props.schedule)
+}
+
+function isPastSchedule(startTime) {
+  if (!startTime) return false
+  return new Date(startTime) < new Date()
+}
+
+function formatTime(isoString) {
+  if (!isoString) return ''
+  const date = new Date(isoString)
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 </script>
 
 <template>
-  <li class="schedule-item">
-    <div class="item-time">{{ formatDate(schedule.start_time, 'time') }}</div>
+  <li class="schedule-item" :class="{ 'past-schedule': isPastSchedule(schedule.start_time) }">
+    <!-- 时间显示 -->
+    <div class="item-time">
+      {{ formatTime(schedule.start_time) }}
+    </div>
+    
+    <!-- 内容区域 -->
     <div class="item-content">
       <h4>{{ schedule.title }}</h4>
       <p v-if="schedule.content">{{ schedule.content }}</p>
+      
+      <!-- 倒计时显示（新增） -->
+      <CountdownDisplay 
+        v-if="schedule.countdown"
+        :target-time="schedule.start_time"
+        :title="schedule.title"
+        size="small"
+        :show-icon="true"
+        class="schedule-countdown"
+      />
+      
+      <!-- 位置信息 -->
+      <div v-if="schedule.location" class="item-location">
+        <MapPin :size="14" />
+        <span>{{ schedule.location }}</span>
+      </div>
       
       <!-- 天气信息 -->
       <div v-if="schedule.weather_info" class="item-weather">
@@ -91,6 +121,11 @@ function handleDelete() {
   box-shadow: 0 7px 14px rgba(50, 50, 93, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
 }
 
+.schedule-item.past-schedule {
+  opacity: 0.7;
+  background-color: #f8f9fa;
+}
+
 .item-time {
   font-size: 1.2rem;
   font-weight: 700;
@@ -114,6 +149,19 @@ function handleDelete() {
   margin: 0;
   font-size: 0.9rem;
   color: #8898aa;
+}
+
+.schedule-countdown {
+  margin-top: 0.5rem;
+}
+
+.item-location {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #525F7F;
 }
 
 .item-weather {
@@ -164,33 +212,29 @@ function handleDelete() {
 .item-actions {
   display: flex;
   gap: 0.5rem;
-  flex-shrink: 0;
+  margin-left: 1rem;
 }
 
 .action-btn {
-  background: none;
+  width: 36px;
+  height: 36px;
   border: none;
-  padding: 0.5rem;
+  background-color: #f0f0f0;
+  border-radius: 6px;
   cursor: pointer;
-  color: #adb5bd;
-  transition: color 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  transition: all 0.2s;
 }
 
 .action-btn:hover {
-  color: #5E72E4;
-  background-color: #f8f9fe;
+  background-color: #5E72E4;
+  color: white;
 }
 
 .action-btn-delete:hover {
-  color: #f5365c;
-  background-color: #fff5f5;
-}
-
-.item-content .weather-alerts-container {
-  margin-top: 0.5rem;
+  background-color: #f44336;
+  color: white;
 }
 </style>

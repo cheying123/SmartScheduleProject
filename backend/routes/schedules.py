@@ -8,61 +8,75 @@ from services.weather_service import get_weather_for_date, get_weather_with_aler
 from services.nlp_parser import parse_natural_language
 from services.conflict_detector import detect_schedule_conflicts
 
+from services.weather_service import get_weather_for_date, get_weather_with_alerts
+from services.conflict_detector import detect_schedule_conflicts
+from services.countdown_service import CountdownService
+
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 
 
 @schedules_bp.route('', methods=['GET'])
 @token_required
 def get_schedules(current_user):
-    """获取当前用户的所有日程"""
+    """获取当前用户的所有日程，并自动更新天气信息"""
+    from datetime import datetime, timedelta
+    
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.start_time.asc()).all()
     
+    # 自动更新每个日程的天气信息（未来 7 天内）
     today = datetime.now().strftime('%Y-%m-%d')
-    max_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-    
-    city_location_id = current_user.location or "101010100"
-    needs_update = False
-    
-    # 检查是否需要更新天气（未来 7 天内没有天气信息的日程）
-    for schedule in schedules:
-        schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-        if today <= schedule_date <= max_date and not schedule.weather_info:
-            needs_update = True
-            break
-    
-    if needs_update:
-        print(f"🌤️ 开始更新天气信息...")
-        for schedule in schedules:
-            schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-            if today <= schedule_date <= max_date:
-                try:
-                    weather_result = get_weather_with_alerts(city_location_id, schedule_date)
-                    if weather_result:
-                        schedule.weather_info = weather_result['weather_text']
-                        print(f"✓ 已更新 {schedule_date} 的天气")
-                except Exception as e:
-                    print(f"✗ 更新天气失败 {schedule_date}: {e}")
-        
-        db.session.commit()
+    seven_days_later = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
     
     schedule_list = []
+    
     for schedule in schedules:
-        schedule_dict = schedule.to_dict()
         schedule_date = schedule.start_time.strftime('%Y-%m-%d')
         
-        # 为未来 7 天内的日程添加天气提醒
-        if today <= schedule_date <= max_date:
+        # 检查是否需要更新天气（未来 7 天内没有天气信息的日程）
+        needs_weather_update = (
+            today <= schedule_date <= seven_days_later and 
+            (not schedule.weather_info or '气温' not in schedule.weather_info)
+        )
+        
+        if needs_weather_update:
             try:
+                city_location_id = current_user.location or "101010100"
                 weather_result = get_weather_with_alerts(city_location_id, schedule_date)
-                if weather_result and weather_result.get('alerts'):
+                if weather_result:
+                    schedule.weather_info = weather_result['weather_text']
+                    print(f"✓ 已更新 {schedule_date} 的天气：{weather_result['weather_text']}")
+                    if weather_result['alerts']:
+                        print(f"  生成 {len(weather_result['alerts'])} 条智能提醒")
+            except Exception as e:
+                print(f"✗ 更新天气失败 {schedule_date}: {e}")
+        
+        # 转换日程为字典格式
+        schedule_dict = schedule.to_dict()
+        
+        # 附加天气提醒信息（如果在未来 7 天内且有提醒）
+        if today <= schedule_date <= seven_days_later:
+            try:
+                city_location_id = current_user.location or "101010100"
+                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                if weather_result and weather_result['alerts']:
                     schedule_dict['weather_alerts'] = weather_result['alerts']
             except:
                 pass
         
+        # 附加倒计时信息（新增）
+        try:
+            countdown_info = CountdownService.get_countdown_info(schedule.start_time, 'standard')
+            if countdown_info:
+                schedule_dict['countdown'] = countdown_info
+        except Exception as e:
+            print(f"✗ 生成倒计时失败：{e}")
+        
         schedule_list.append(schedule_dict)
     
+    # 提交天气信息更新
+    db.session.commit()
+    
     return jsonify(schedule_list)
-
 
 
 @schedules_bp.route('', methods=['POST'])
