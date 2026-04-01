@@ -53,15 +53,10 @@ def create_app():
     def health():
         return jsonify({'status': 'healthy', 'database': 'connected'})
     
-    # 全局 CORS 中间件 - 确保所有 /api/ 请求都有 CORS 头
-    @app.after_request
-    def add_cors_headers(response):
-        if request.path.startswith('/api/'):
-            response.headers.add('Access-Control-Allow-Origin', 'http://localhost:5173')
-            response.headers.add('Access-Control-Allow-Credentials', 'true')
-            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-            response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-        return response
+    # 健康检查
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        return jsonify({'status': 'ok'})
     
     return app
 

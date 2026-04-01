@@ -39,7 +39,7 @@ const emit = defineEmits(['edit', 'delete'])
       <p>点击上方"新建日程"按钮，开始你的第一个日程吧！</p>
     </div>
 
-    <!-- 日程列表 -->
+     <!-- 日程列表 -->
     <transition-group name="list" tag="div" v-else>
       <div v-for="(schedulesOnDate, date) in groupedSchedules" 
            :key="date" 
@@ -51,7 +51,7 @@ const emit = defineEmits(['edit', 'delete'])
             :key="schedule.id"
             :schedule="schedule"
             @edit="$emit('edit', $event)"
-            @delete="$emit('delete', $event)"
+            @delete="$emit('delete', schedule.id)"
           />
         </ul>
       </div>

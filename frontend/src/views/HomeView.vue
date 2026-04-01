@@ -1,7 +1,9 @@
+
+
 <script setup>
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun } from 'lucide-vue-next'
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
 
@@ -37,7 +39,7 @@ const {
   newSchedule,
   editForm,
   fetchSchedules,
-  addSchedule: originalAddSchedule,  // ← 注意这里要重命名
+  addSchedule: originalAddSchedule,
   deleteSchedule,
   openEditModal,
   closeEditModal,
@@ -94,7 +96,6 @@ function showNotification(type, message, duration = 3000) {
     notification.value.show = false
   }, duration)
 }
-
 
 const {
   isNaturalLanguageMode,
@@ -155,9 +156,9 @@ const currentTimezone = ref('')
 const isLogoutModalVisible = ref(false)
 const createMode = ref(CREATE_MODES.FORM)
 const isFormVisible = ref(false)
-const notification = ref({  // ← 新增：通知状态
+const notification = ref({
   show: false,
-  type: 'success', // 'success' | 'error'
+  type: 'success',
   message: '',
   duration: 3000
 })
@@ -195,6 +196,84 @@ function openNaturalLanguageForm() {
   naturalLanguageInput.value = ''
 }
 
+// 格式化相对时间
+function formatRelativeTime(isoString) {
+  if (!isoString) return ''
+  const date = new Date(isoString)
+  const now = new Date()
+  const diffMs = date - now
+  const diffMins = Math.floor(diffMs / 60000)
+  
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins}分钟后`
+  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时后`
+  return `${Math.floor(diffMins / 1440)}天后`
+}
+
+// 获取提醒图标
+function getReminderIcon(priority) {
+  switch(priority) {
+    case 'urgent':
+      return AlertCircle
+    case 'high':
+      return Bell
+    default:
+      return Calendar
+  }
+}
+
+// 获取提醒样式
+function getReminderStyle(priority) {
+  const styles = {
+    urgent: 'reminder-urgent',
+    high: 'reminder-high',
+    medium: 'reminder-medium',
+    low: 'reminder-low'
+  }
+  return styles[priority] || 'reminder-low'
+}
+
+// 计算进度条宽度
+function getProgressWidth(countdown) {
+  if (!countdown) return '0%'
+  
+  const remainingSeconds = countdown.remaining_seconds
+  const totalSeconds = 24 * 60 * 60 // 24 小时作为最大值
+  
+  if (remainingSeconds <= 0) return '100%'
+  if (remainingSeconds > totalSeconds) return '10%'
+  
+  const percentage = ((totalSeconds - remainingSeconds) / totalSeconds) * 100
+  return `${Math.min(100, Math.max(10, percentage))}%`
+}
+
+// 跳转到指定日程
+function navigateToSchedule(scheduleId) {
+  // 切换到日程标签页
+  activeTab.value = 'schedule'
+  
+  // 滚动到该日程位置
+  setTimeout(() => {
+    const element = document.getElementById(`schedule-${scheduleId}`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      element.style.animation = 'highlight 2s ease'
+    }
+  }, 300)
+}
+
+// 获取通知标题
+function getNotificationTitle(type) {
+  const titles = {
+    'weather': '🌦️ 天气提醒',
+    'time_preference': '⏰ 时间偏好',
+    'balance': '⚖️ 日程平衡',
+    'schedule_reminder': '📅 日程提醒',
+    'info': 'ℹ️ 提示信息'
+  }
+  return titles[type] || '消息通知'
+}
+
 function handleLogout() {
   userStore.logout()
   isLogoutModalVisible.value = false
@@ -226,6 +305,7 @@ onMounted(async () => {
   }
   
   fetchSchedules(API_URL)
+  loadRecommendations()
 })
 
 onUnmounted(() => {
@@ -240,7 +320,7 @@ onUnmounted(() => {
       :is-collapsed="isSidebarCollapsed"
       :active-tab="activeTab"
       :user="userStore.user"
-      :recommendations-count="recommendations.length"
+      :recommendations-count="recommendations ? recommendations.length : 0"
       @toggle-collapse="isSidebarCollapsed = !isSidebarCollapsed"
       @tab-change="activeTab = $event"
       @logout="handleLogout"
@@ -286,15 +366,80 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- 通知页面 -->
+      <!-- 通知页面（带倒计时提醒） -->
       <div v-if="activeTab === 'notifications'" class="tab-content">
-        <NotificationList
-          :recommendations="recommendations"
-          @refresh="loadRecommendations"
-        />
+        <div class="notifications-panel">
+          <button class="refresh-btn" @click="loadRecommendations">
+            <Check :size="18" />
+            <span>刷新推荐</span>
+          </button>
+          
+          <div v-if="!recommendations || recommendations.length === 0" class="empty-notifications">
+            <Bell :size="64" />
+            <h3>暂无新消息</h3>
+            <p>点击"刷新推荐"获取智能建议</p>
+          </div>
+          
+          <div v-else class="notifications-list">
+            <!-- 倒计时提醒和普通通知混合显示 -->
+            <div 
+              v-for="(rec, index) in recommendations" 
+              :key="index" 
+              class="notification-item"
+              :class="[
+                rec.type === 'schedule_reminder' ? 'type-schedule-reminder' : ('type-' + rec.type),
+                getReminderStyle(rec.priority)
+              ]"
+            >
+              <div class="notification-icon">
+                <component 
+                  v-if="rec.type === 'schedule_reminder'"
+                  :is="getReminderIcon(rec.priority)" 
+                  :size="24"
+                />
+                <Sun v-else-if="rec.type === 'weather'" :size="24" />
+                <Check v-else-if="rec.type === 'time_preference'" :size="24" />
+                <Globe v-else :size="24" />
+              </div>
+              <div class="notification-content">
+                <h4>
+                  {{ rec.type === 'schedule_reminder' ? '⏰ 日程提醒' : getNotificationTitle(rec.type) }}
+                </h4>
+                <p>{{ rec.message }}</p>
+                
+                <!-- 倒计时详情（仅日程提醒显示） -->
+                <div v-if="rec.type === 'schedule_reminder' && rec.countdown" class="countdown-details">
+                  <div class="countdown-time-display">
+                    <Clock :size="14" />
+                    <span class="time-text">{{ rec.countdown.remaining_text }}</span>
+                    <span class="relative-time">{{ formatRelativeTime(rec.start_time) }}</span>
+                  </div>
+                  
+                  <!-- 进度条（可视化剩余时间） -->
+                  <div class="countdown-progress">
+                    <div 
+                      class="progress-bar"
+                      :style="{ width: getProgressWidth(rec.countdown) }"
+                    ></div>
+                  </div>
+                  
+                  <!-- 快速操作按钮 -->
+                  <div class="quick-actions">
+                    <button 
+                      class="view-schedule-btn"
+                      @click="navigateToSchedule(rec.schedule_id)"
+                    >
+                      查看日程
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-            <!-- 设置页面 -->
+      <!-- 设置页面 -->
       <div v-if="activeTab === 'settings'" class="tab-content">
         <div class="settings-panel">
           <h3>偏好设置</h3>
@@ -418,6 +563,7 @@ onUnmounted(() => {
         </div>
       </div>
     </transition>
+
     <!-- 通知提示 -->
     <transition name="slide-fade">
       <div v-if="notification.show" class="notification-toast" :class="notification.type">
@@ -548,6 +694,218 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 2rem;
+}
+
+/* ===== 通知面板样式 ===== */
+.notifications-panel {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.refresh-btn {
+  background-color: #5E72E4;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  transition: all 0.2s;
+}
+
+.refresh-btn:hover {
+  background-color: #4c5fd5;
+  transform: translateY(-2px);
+}
+
+.empty-notifications {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: #adb5bd;
+}
+
+.empty-notifications h3 {
+  margin: 1rem 0 0.5rem 0;
+  color: #32325D;
+}
+
+.empty-notifications p {
+  color: #8898aa;
+}
+
+.notifications-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.notification-item {
+  display: flex;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-radius: 8px;
+  border-left-width: 6px;
+  border-left-style: solid;
+  background-color: #f8f9fa;
+  transition: all 0.3s ease;
+}
+
+.notification-item:hover {
+  transform: translateX(5px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.notification-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: rgba(94, 114, 228, 0.1);
+  color: #5E72E4;
+}
+
+.notification-content {
+  flex-grow: 1;
+}
+
+.notification-content h4 {
+  margin: 0 0 0.5rem 0;
+  color: #32325D;
+  font-size: 1.1rem;
+}
+
+.notification-content p {
+  margin: 0;
+  color: #525F7F;
+  line-height: 1.6;
+}
+
+/* 日程提醒特殊样式 */
+.notification-item.type-schedule-reminder {
+  animation: none;
+}
+
+/* 不同优先级的样式 */
+.reminder-urgent {
+  background-color: #ffebee;
+  border-left-color: #f44336;
+  animation: pulse-border 2s infinite;
+}
+
+.reminder-high {
+  background-color: #fff3e0;
+  border-left-color: #ff9800;
+}
+
+.reminder-medium {
+  background-color: #fff9c4;
+  border-left-color: #ffc107;
+}
+
+.reminder-low {
+  background-color: #e3f2fd;
+  border-left-color: #2196F3;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+  }
+}
+
+/* 倒计时详情区域 */
+.countdown-details {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.countdown-time-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #525F7F;
+  margin-bottom: 0.5rem;
+}
+
+.countdown-time-display svg {
+  color: #5E72E4;
+}
+
+.time-text {
+  font-weight: 600;
+  color: #32325D;
+}
+
+.relative-time {
+  font-size: 0.85em;
+  color: #8898aa;
+  margin-left: auto;
+}
+
+/* 进度条 */
+.countdown-progress {
+  width: 100%;
+  height: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #5E72E4 0%, #825EE4 100%);
+  border-radius: 3px;
+  transition: width 1s ease;
+}
+
+.reminder-urgent .progress-bar {
+  background: linear-gradient(90deg, #f44336 0%, #ff6659 100%);
+}
+
+.reminder-high .progress-bar {
+  background: linear-gradient(90deg, #ff9800 0%, #ffb74d 100%);
+}
+
+.reminder-medium .progress-bar {
+  background: linear-gradient(90deg, #ffc107 0%, #ffd54f 100%);
+}
+
+/* 快速操作按钮 */
+.quick-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-schedule-btn {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  background-color: rgba(94, 114, 228, 0.1);
+  color: #5E72E4;
+  border: 1px solid rgba(94, 114, 228, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-schedule-btn:hover {
+  background-color: #5E72E4;
+  color: white;
 }
 
 /* ===== 设置面板样式 ===== */
@@ -874,5 +1232,15 @@ onUnmounted(() => {
 .slide-fade-leave-to {
   transform: translateX(400px);
   opacity: 0;
+}
+
+/* ===== 高亮动画 ===== */
+@keyframes highlight {
+  0%, 100% {
+    background-color: white;
+  }
+  50% {
+    background-color: #fff3cd;
+  }
 }
 </style>

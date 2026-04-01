@@ -21,7 +21,7 @@ function handleEdit() {
 }
 
 function handleDelete() {
-  emit('delete', props.schedule)
+  emit('delete', props.schedule.id)
 }
 
 function isPastSchedule(startTime) {

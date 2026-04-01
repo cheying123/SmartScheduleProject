@@ -24,12 +24,14 @@ export function useNotifications(API_URL) {
   async function loadRecommendations() {
     try {
       const response = await axios.get(`${API_URL}/recommendations`)
-      recommendations.value = response.data.recommendations
+      // 修改：后端直接返回数组，不需要 .recommendations
+      recommendations.value = Array.isArray(response.data) ? response.data : []
       showRecommendations.value = true
       hasUnreadNotifications.value = false
       return true
     } catch (error) {
       console.error('加载推荐失败:', error)
+      recommendations.value = []  // 确保即使出错也是空数组而不是 undefined
       return false
     }
   }
