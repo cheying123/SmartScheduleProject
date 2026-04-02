@@ -22,7 +22,18 @@ class Config:
     # JWT 配置
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
     JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 小时
+    JWT_TOKEN_LOCATION = ['headers', 'cookies']  # 新增：允许从 headers 和 cookies 获取 token
+    JWT_COOKIE_SECURE = False  # 开发环境设为 False，生产环境改为 True
+    JWT_COOKIE_CSRF_PROTECT = False  # 开发环境暂时关闭 CSRF 保护
+    JWT_HEADER_NAME = 'Authorization'
+    JWT_HEADER_TYPE = 'Bearer'
     
+    
+    JWT_IDENTITY_CLAIM = 'user_id'
+    
+    
+
+
     # 天气 API 配置
     QWEATHER_API_KEY = os.getenv('QWEATHER_API_KEY')
     

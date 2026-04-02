@@ -1,5 +1,5 @@
 <script setup>
-import { Calendar, User, Bell, Settings, LogOut } from 'lucide-vue-next'
+import { Calendar, User, Bell, Settings, LogOut, BarChart } from 'lucide-vue-next'
 import { NAVIGATION } from '@/constants'
 
 const props = defineProps({
@@ -81,7 +81,14 @@ function getUserInitial() {
           {{ recommendationsCount }}
         </span>
       </a>
-      
+      <a 
+        href="#" 
+        class="nav-item" 
+        @click.prevent="$router.push('/statistics')"
+      >
+        <BarChart :size="20" />
+        <span v-if="!isCollapsed">效率分析</span>
+      </a>
       <a 
         href="#" 
         class="nav-item" 

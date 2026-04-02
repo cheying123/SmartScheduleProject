@@ -1,5 +1,6 @@
 import os
 from flask import Flask, jsonify, request
+from flask_jwt_extended import JWTManager  # 新增导入
 from config import Config
 from extensions import db, migrate, cors
 from models.user import User
@@ -11,6 +12,7 @@ from routes.users import users_bp
 from routes.recommendations import recommendations_bp
 from routes.weather import weather_bp
 from routes.location import location_bp  # 新增
+from routes.analytics import analytics_bp  # 新增导入
 
 
 def create_app():
@@ -21,6 +23,7 @@ def create_app():
     # 初始化扩展
     db.init_app(app)
     migrate.init_app(app, db)
+    jwt = JWTManager(app)  # 新增：初始化 JWTManager
     
         # CORS 配置 - 只允许一个 origin，避免重复
     cors.init_app(
@@ -42,6 +45,7 @@ def create_app():
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(weather_bp)
     app.register_blueprint(location_bp)  # 新增
+    app.register_blueprint(analytics_bp)  # 新增：注册分析蓝图
     
     # 根路由
     @app.route('/')

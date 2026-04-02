@@ -29,6 +29,20 @@ function isPastSchedule(startTime) {
   return new Date(startTime) < new Date()
 }
 
+function isExpiredDate(startTime) {
+  if (!startTime) return false
+  
+  const scheduleDate = new Date(startTime)
+  const today = new Date()
+  
+  // 只比较日期部分，不比较时间
+  const scheduleDateOnly = new Date(scheduleDate.getFullYear(), scheduleDate.getMonth(), scheduleDate.getDate())
+  const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  
+  // 只有昨天的日期及之前才算过期
+  return scheduleDateOnly < todayDateOnly
+}
+
 function formatTime(isoString) {
   if (!isoString) return ''
   const date = new Date(isoString)
@@ -67,9 +81,9 @@ function formatTime(isoString) {
       <!-- 天气信息 -->
       <div v-if="schedule.weather_info" class="item-weather">
         {{ schedule.weather_info }}
-        <span v-if="isPastSchedule(schedule.start_time)" class="expired-tag">
-          (已过期)
-        </span>
+        <span v-if="isExpiredDate(schedule.start_time)" class="expired-tag">
+        (已过期)
+      </span>
       </div>
       
       <!-- 智能天气提醒 -->

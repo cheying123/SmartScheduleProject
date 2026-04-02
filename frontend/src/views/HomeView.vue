@@ -3,9 +3,11 @@
 <script setup>
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart } from 'lucide-vue-next'
+
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
+
 
 // Composables
 import { useSchedule } from '@/composables/useSchedule'
@@ -283,6 +285,10 @@ function handleLogout() {
 function switchToNotifications() {
   activeTab.value = NAVIGATION.tabs.NOTIFICATIONS
   clearNotifications()
+}
+
+function goToStatistics() {
+  router.push('/statistics')
 }
 
 // 生命周期
