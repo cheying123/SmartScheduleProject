@@ -157,7 +157,13 @@ def update_schedule(current_user, id):
         if 'start_time' in data:
             local_dt = datetime.fromisoformat(data['start_time'].replace('Z', ''))
             
-            end_time = datetime.fromisoformat(data['end_time'].replace('Z', '')) if data.get('end_time') else local_dt + timedelta(hours=1)
+            # 处理结束时间：如果有值则转换，如果是空字符串则设为 None，否则默认为开始时间后 1 小时
+            if data.get('end_time') and data['end_time'].strip():
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+            elif data.get('end_time') == '':
+                end_time = None
+            else:
+                end_time = local_dt + timedelta(hours=1)
             
             conflicts = detect_schedule_conflicts(
                 current_user.id,

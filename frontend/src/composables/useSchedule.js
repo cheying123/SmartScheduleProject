@@ -25,6 +25,7 @@ export function useSchedule(userStore, API_URL) {
     title: '',
     content: '',
     start_time: getCurrentDateTime(),
+    end_time: '',
     priority: 1,
     is_recurring: false,
     recurring_pattern: ''
@@ -36,6 +37,7 @@ export function useSchedule(userStore, API_URL) {
     title: '',
     content: '',
     start_time: '',
+    end_time: '',
     priority: 1,
     is_recurring: false,
     recurring_pattern: ''
@@ -142,16 +144,29 @@ export function useSchedule(userStore, API_URL) {
     
     // 转换时间为本地格式
     const scheduleDate = new Date(schedule.start_time)
-    const year = scheduleDate.getFullYear()
+    const year = String(scheduleDate.getFullYear())
     const month = String(scheduleDate.getMonth() + 1).padStart(2, '0')
     const day = String(scheduleDate.getDate()).padStart(2, '0')
     const hours = String(scheduleDate.getHours()).padStart(2, '0')
     const minutes = String(scheduleDate.getMinutes()).padStart(2, '0')
     
+    // 转换结束时间为本地格式（如果有）
+    let localEndTime = ''
+    if (schedule.end_time) {
+      const endDate = new Date(schedule.end_time)
+      const endYear = String(endDate.getFullYear())
+      const endMonth = String(endDate.getMonth() + 1).padStart(2, '0')
+      const endDay = String(endDate.getDate()).padStart(2, '0')
+      const endHours = String(endDate.getHours()).padStart(2, '0')
+      const endMinutes = String(endDate.getMinutes()).padStart(2, '0')
+      localEndTime = `${endYear}-${endMonth}-${endDay}T${endHours}:${endMinutes}`
+    }
+    
     editForm.value = {
       title: schedule.title,
       content: schedule.content || '',
       start_time: `${year}-${month}-${day}T${hours}:${minutes}`,
+      end_time: localEndTime,
       priority: schedule.priority || 1,
       is_recurring: schedule.is_recurring || false,
       recurring_pattern: schedule.recurring_pattern || ''
@@ -167,6 +182,7 @@ export function useSchedule(userStore, API_URL) {
       title: '',
       content: '',
       start_time: '',
+      end_time: '',
       priority: 1,
       is_recurring: false,
       recurring_pattern: ''

@@ -1,4 +1,5 @@
 <script setup>
+import { ref, watch } from 'vue'
 import { PlusCircle, Globe } from 'lucide-vue-next'
 import { PRIORITY_LEVELS, RECURRING_PATTERNS } from '@/constants'
 
@@ -9,13 +10,166 @@ const props = defineProps({
   },
   mode: {
     type: String,
-    default: 'create', // 'create' or 'edit'
+    default: 'create',
     validator: (value) => ['create', 'edit'].includes(value)
   }
 })
 
-const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
+const emit = defineEmits(['submit', 'cancel', 'switch-mode', 'update:schedule'])
+
+const hasEndTime = ref(false)
+const localEndTime = ref('')
+
+const convertUTCToLocal = (utcDateTimeString) => {
+  if (!utcDateTimeString) return ''
+  const utcDate = new Date(utcDateTimeString)
+  const year = utcDate.getFullYear()
+  const month = String(utcDate.getMonth() + 1).padStart(2, '0')
+  const day = String(utcDate.getDate()).padStart(2, '0')
+  const hours = String(utcDate.getHours()).padStart(2, '0')
+  const minutes = String(utcDate.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+const convertLocalToUTC = (localDateTimeString) => {
+  if (!localDateTimeString) return ''
+  const localDate = new Date(localDateTimeString)
+  return localDate.toISOString()
+}
+
+const initEndTimeFromDB = () => {
+  console.log('🔍 初始化结束时间 - DB 值:', props.schedule.end_time)
+  
+  if (props.schedule.end_time && props.schedule.end_time.trim() !== '') {
+    hasEndTime.value = true
+    localEndTime.value = convertUTCToLocal(props.schedule.end_time)
+    console.log('✅ 有结束时间，已勾选复选框，本地时间:', localEndTime.value)
+  } else {
+    hasEndTime.value = false
+    localEndTime.value = ''
+    console.log('❌ 无结束时间，未勾选复选框')
+  }
+}
+
+watch(() => props.schedule, (newSchedule) => {
+  console.log('👁️ watch 触发 - 新的 end_time:', newSchedule?.end_time)
+  if (newSchedule?.end_time && newSchedule.end_time.trim() !== '') {
+    hasEndTime.value = true
+    localEndTime.value = convertUTCToLocal(newSchedule.end_time)
+    console.log('✅ watch 更新 - 复选框勾选，本地时间:', localEndTime.value)
+  } else {
+    hasEndTime.value = false
+    localEndTime.value = ''
+    console.log('❌ watch 更新 - 复选框取消')
+  }
+}, { immediate: true, deep: true })
+
+const handleEndTimeToggle = (checked) => {
+  console.log('🔄 切换结束时间 - checked:', checked)
+  hasEndTime.value = checked
+  
+  if (checked) {
+    if (localEndTime.value) {
+      emit('update:schedule', { ...props.schedule, end_time: localEndTime.value })
+    } else {
+      const start = new Date(props.schedule.start_time)
+      const end = new Date(start.getTime() + 60 * 60 * 1000)
+      const year = end.getFullYear()
+      const month = String(end.getMonth() + 1).padStart(2, '0')
+      const day = String(end.getDate()).padStart(2, '0')
+      const hours = String(end.getHours()).padStart(2, '0')
+      const minutes = String(end.getMinutes()).padStart(2, '0')
+      const end_time = `${year}-${month}-${day}T${hours}:${minutes}`
+      localEndTime.value = end_time
+      emit('update:schedule', { ...props.schedule, end_time })
+    }
+  } else {
+    // 取消勾选时，清除结束时间
+    console.log('🗑️ 取消勾选，清除结束时间')
+    localEndTime.value = ''
+    emit('update:schedule', { ...props.schedule, end_time: '' })
+  }
+}
+
+const handleEndTimeChange = (value) => {
+  localEndTime.value = value
+  emit('update:schedule', { ...props.schedule, end_time: value })
+}
+
+const handleStartTimeChange = (value) => {
+  emit('update:schedule', { ...props.schedule, start_time: value })
+  
+  if (hasEndTime.value && localEndTime.value) {
+    const start = new Date(value)
+    const end = new Date(localEndTime.value)
+    
+    if (end <= start) {
+      const newEnd = new Date(start.getTime() + 60 * 60 * 1000)
+      const year = newEnd.getFullYear()
+      const month = String(newEnd.getMonth() + 1).padStart(2, '0')
+      const day = String(newEnd.getDate()).padStart(2, '0')
+      const hours = String(newEnd.getHours()).padStart(2, '0')
+      const minutes = String(newEnd.getMinutes()).padStart(2, '0')
+      const end_time = `${year}-${month}-${day}T${hours}:${minutes}`
+      localEndTime.value = end_time
+      emit('update:schedule', { ...props.schedule, end_time })
+    }
+  }
+}
+
+const validateEndTime = () => {
+  if (!hasEndTime.value || !localEndTime.value || !props.schedule.start_time) {
+    return true
+  }
+  
+  const start = new Date(props.schedule.start_time)
+  const end = new Date(localEndTime.value)
+  
+  if (end <= start) {
+    alert('结束时间必须晚于开始时间！')
+    
+    const newEnd = new Date(start.getTime() + 60 * 60 * 1000)
+    const year = newEnd.getFullYear()
+    const month = String(newEnd.getMonth() + 1).padStart(2, '0')
+    const day = String(newEnd.getDate()).padStart(2, '0')
+    const hours = String(newEnd.getHours()).padStart(2, '0')
+    const minutes = String(newEnd.getMinutes()).padStart(2, '0')
+    const end_time = `${year}-${month}-${day}T${hours}:${minutes}`
+    
+    localEndTime.value = end_time
+    emit('update:schedule', { ...props.schedule, end_time })
+    return false
+  }
+  
+  return true
+}
+
+const handleSubmit = () => {
+  console.log('📤 提交表单 - hasEndTime:', hasEndTime.value, 'localEndTime:', localEndTime.value)
+  
+  if (validateEndTime()) {
+    const scheduleData = { ...props.schedule }
+    
+    if (hasEndTime.value && localEndTime.value) {
+      scheduleData.end_time = convertLocalToUTC(localEndTime.value)
+      console.log('✅ 提交 - 包含结束时间:', scheduleData.end_time)
+    } else {
+      scheduleData.end_time = ''
+      console.log('✅ 提交 - 清除结束时间')
+    }
+    
+    console.log('📦 提交数据:', scheduleData)
+    emit('update:schedule', scheduleData)
+    setTimeout(() => {
+      emit('submit')
+    }, 0)
+  }
+}
+
+initEndTimeFromDB()
 </script>
+
+// ... existing code ...
 
 <template>
   <div class="form-container">
@@ -35,7 +189,7 @@ const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
       </button>
     </div>
     
-    <form @submit.prevent="$emit('submit')">
+    <form @submit.prevent="handleSubmit">
       <div class="form-group">
         <label for="title">标题</label>
         <input 
@@ -64,9 +218,33 @@ const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
           id="start_time" 
           type="datetime-local" 
           :value="schedule.start_time"
-          @input="$emit('update:schedule', { ...schedule, start_time: $event.target.value })"
+          @input="handleStartTimeChange($event.target.value)"
           required
         >
+      </div>
+
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input 
+            type="checkbox" 
+            :checked="hasEndTime"
+            @change="handleEndTimeToggle($event.target.checked)"
+            class="checkbox-input"
+          >
+          <span>设置结束时间</span>
+        </label>
+      </div>
+
+      <div v-if="hasEndTime" class="form-group fade-transition">
+        <label for="end_time">结束时间</label>
+        <input 
+          id="end_time" 
+          type="datetime-local" 
+          :value="localEndTime"
+          @input="handleEndTimeChange($event.target.value)"
+          :min="schedule.start_time"
+        >
+        <small class="form-tip">结束时间必须晚于开始时间</small>
       </div>
       
       <div class="form-group">
@@ -122,6 +300,7 @@ const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
     </form>
   </div>
 </template>
+
 
 <style scoped>
 /* 从 HomeView.vue 复制表单相关样式 */
@@ -236,6 +415,13 @@ const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
   accent-color: #5E72E4;
 }
 
+.form-tip {
+  display: block;
+  margin-top: 0.25rem;
+  color: #8898aa;
+  font-size: 0.85rem;
+}
+
 /* 表单按钮 */
 .form-actions {
   display: flex;
@@ -264,5 +450,21 @@ const emit = defineEmits(['submit', 'cancel', 'switch-mode'])
 
 .btn-submit:hover {
   background-color: #4a5fd6;
+}
+
+/* 过渡动画 - 简化版本 */
+.fade-transition {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
