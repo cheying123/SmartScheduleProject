@@ -13,6 +13,7 @@ from routes.recommendations import recommendations_bp
 from routes.weather import weather_bp
 from routes.location import location_bp  # 新增
 from routes.analytics import analytics_bp  # 新增导入
+from routes.ai import ai_bp
 
 
 def create_app():
@@ -46,6 +47,7 @@ def create_app():
     app.register_blueprint(weather_bp)
     app.register_blueprint(location_bp)  # 新增
     app.register_blueprint(analytics_bp)  # 新增：注册分析蓝图
+    app.register_blueprint(ai_bp) # AI 分析助手（使用 ANALYSIS_AI_* 配置）
     
     # 根路由
     @app.route('/')

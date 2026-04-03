@@ -1,14 +1,13 @@
-
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
-import { Clock, TrendingUp, Calendar, Target , ArrowLeft} from 'lucide-vue-next'
+import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart } from 'lucide-vue-next'
 
 const API_URL = 'http://127.0.0.1:5000/api'
 const userStore = useUserStore()
-const router = useRouter() // 确保有这行
+const router = useRouter()
 
 const statistics = ref(null)
 const recommendations = ref([])
@@ -17,52 +16,28 @@ const activeTab = ref('overview')
 
 const weekdayMap = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
+// AI 聊天相关
+const chatMessages = ref([])
+const newMessage = ref('')
+const isChatLoading = ref(false)
+const sessionId = ref(null)
+const chatContainerRef = ref(null)
+const isAnalyzing = ref(false)
 
-// 新增：返回主页函数
 function goBack() {
   router.push('/')
 }
 
-
 async function loadStatistics() {
   try {
-
-    console.log('🔍 ========== 开始加载统计数据 ==========')
-    console.log('🔍 userStore.token:', userStore.token)
-    console.log('🔍 Token 类型:', typeof userStore.token)
-    console.log('🔍 Token 长度:', userStore.token?.length)
-    console.log('🔍 Token 前 20 个字符:', userStore.token?.substring(0, 20))
-
-    if (!userStore.token) {
-      console.error('❌ 未找到 token，请先登录')
-      router.push('/login')
-      return
-    }
-    
-    // 检查 token 格式
-    const authHeader = `Bearer ${userStore.token}`
-    console.log('🔍 Authorization Header:', authHeader.substring(0, 30) + '...')
-
     const response = await axios.get(`${API_URL}/analytics/statistics`, {
       headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json'
+        'Authorization': `Bearer ${userStore.token}`
       }
     })
-    console.log('✅ 统计数据加载成功:', response.data)
     statistics.value = response.data
   } catch (error) {
-    console.error('❌ 加载统计数据失败:')
-    console.error('❌ 错误对象:', error)
-    console.error('❌ 错误响应:', error.response)
-    console.error('❌ 错误状态码:', error.response?.status)
-    console.error('❌ 错误数据:', error.response?.data)
-    console.error('❌ 请求头:', error.config?.headers)
-
-    if (error.response?.status === 422) {
-      console.error('❌ Token 无效或格式错误')
-      console.error('❌ 后端返回的错误信息:', error.response.data)
-    }
+    console.error('加载统计数据失败:', error)
   } finally {
     isLoading.value = false
   }
@@ -70,59 +45,175 @@ async function loadStatistics() {
 
 async function loadRecommendations() {
   try {
-
-    console.log('🔍 ========== 开始加载推荐数据 ==========')
-    console.log('🔍 userStore.token:', userStore.token)
-    
-    if (!userStore.token) {
-      console.error('❌ 未找到 token，请先登录')
-      return
-    }
-
-
     const response = await axios.get(`${API_URL}/analytics/recommendations`, {
       headers: {
-        'Authorization': `Bearer ${userStore.token}`,
-        'Content-Type': 'application/json'
+        'Authorization': `Bearer ${userStore.token}`
       }
     })
-
-    console.log('✅ 推荐加载成功:', response.data)
     recommendations.value = response.data.recommendations
   } catch (error) {
-    console.error('❌ 加载推荐失败:')
-    console.error('❌ 错误响应:', error.response)
-    console.error('❌ 错误状态码:', error.response?.status)
-    console.error('❌ 错误数据:', error.response?.data)
+    console.error('加载推荐失败:', error)
+  }
+}
+
+async function loadSmartAnalysis() {
+  isAnalyzing.value = true
+  
+  try {
+    const response = await axios.get(`${API_URL}/ai/smart-analysis?days=7`, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      }
+    })
     
-    if (error.response?.status === 422) {
-      console.error('❌ Token 无效或格式错误')
-      console.error('❌ 后端返回的错误信息:', error.response.data)
+    const { report, recommendations: recs, stats } = response.data
+    
+    // 初始化欢迎消息
+    let welcomeMessage = `👋 您好！我已经仔细分析了您的所有日程数据。\n\n`
+    
+    if (stats.total_tasks > 0) {
+      welcomeMessage += `【数据概览】\n`
+      welcomeMessage += `• 共记录了 ${stats.total_tasks} 个日程\n`
+      
+      if (stats.productive_hours.length > 0) {
+        welcomeMessage += `• 您的高效时段：${stats.productive_hours.map(h => h + '点').join('、')}\n`
+      }
+      
+      if (stats.busy_days.length > 0) {
+        const busyDaysStr = stats.busy_days.map(d => weekdayMap[d]).join('、')
+        welcomeMessage += `• 繁忙日期：${busyDaysStr}\n`
+      }
+      
+      welcomeMessage += `\n【智能分析】\n${report}\n`
+      
+      if (recs && recs.length > 0) {
+        welcomeMessage += `\n【优化建议】\n`
+        recs.forEach((rec, i) => {
+          welcomeMessage += `${i + 1}. ${rec.message}\n`
+        })
+      }
+    } else {
+      welcomeMessage += `您还没有创建任何日程呢～\n\n`
+      welcomeMessage += `💡 小贴士：您可以点击首页的"表单创建"或"智能输入"按钮来添加日程，我会根据您的日程数据提供个性化建议哦！`
     }
+    
+    chatMessages.value = [{
+      role: 'assistant',
+      message: welcomeMessage,
+      created_at: new Date().toISOString()
+    }]
+    
+  } catch (error) {
+    console.error('加载智能分析失败:', error)
+    chatMessages.value = [{
+      role: 'assistant',
+      message: '抱歉，加载分析数据时出现错误，请稍后再试。',
+      created_at: new Date().toISOString()
+    }]
+  } finally {
+    isAnalyzing.value = false
+  }
+}
+
+async function sendMessage() {
+  if (!newMessage.value.trim()) return
+  
+  const userMsg = newMessage.value.trim()
+  chatMessages.value.push({
+    role: 'user',
+    message: userMsg,
+    created_at: new Date().toISOString()
+  })
+  
+  newMessage.value = ''
+  isChatLoading.value = true
+  
+  try {
+    const response = await axios.post(
+      `${API_URL}/ai/chat`,
+      {
+        message: userMsg,
+        session_id: sessionId.value
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`
+        }
+      }
+    )
+    
+    sessionId.value = response.data.session_id
+    
+    chatMessages.value.push({
+      role: 'assistant',
+      message: response.data.response,
+      created_at: new Date().toISOString()
+    })
+    
+    await nextTick()
+    scrollToBottom()
+  } catch (error) {
+    console.error('发送消息失败:', error)
+    chatMessages.value.push({
+      role: 'assistant',
+      message: '抱歉，出现了错误，请稍后再试。',
+      created_at: new Date().toISOString()
+    })
+  } finally {
+    isChatLoading.value = false
+  }
+}
+
+function scrollToBottom() {
+  if (chatContainerRef.value) {
+    chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
+  }
+}
+
+function formatTime(timeStr) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function clearChatHistory() {
+  if (confirm('确定要清空对话历史吗？')) {
+    chatMessages.value = []
+    sessionId.value = null
   }
 }
 
 const productiveHoursText = computed(() => {
   if (!statistics.value?.productivity?.productive_hours?.length) return '暂无数据'
   const hours = statistics.value.productivity.productive_hours
-  return hours.map(h => `${h}点`).join('、')
+  return hours.map(h => `${h}点`).join(',')
 })
 
 const busyDaysText = computed(() => {
   if (!statistics.value?.weekly_pattern?.busy_days?.length) return '暂无数据'
   const days = statistics.value.weekly_pattern.busy_days
-  return days.map(d => weekdayMap[d]).join('、')
+  return days.map(d => weekdayMap[d]).join(',')
 })
 
-onMounted(() => {
-  loadStatistics()
-  loadRecommendations()
+onMounted(async () => {
+  await loadStatistics()
+  await loadRecommendations()
 })
+
+async function handleTabChange(tab) {
+  activeTab.value = tab
+  if (tab === 'ai-chat' && chatMessages.value.length === 0) {
+    await loadSmartAnalysis()
+  }
+  await nextTick()
+  if (chatContainerRef.value) {
+    chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
+  }
+}
 </script>
 
 <template>
   <div class="statistics-container">
-     <!-- 新增：返回按钮 -->
     <div class="page-header">
       <button class="back-btn" @click="goBack" title="返回主页">
         <ArrowLeft :size="20" />
@@ -134,15 +225,22 @@ onMounted(() => {
     <div class="tabs">
       <button 
         :class="['tab-btn', { active: activeTab === 'overview' }]"
-        @click="activeTab = 'overview'"
+        @click="handleTabChange('overview')"
       >
         总览
       </button>
       <button 
         :class="['tab-btn', { active: activeTab === 'recommendations' }]"
-        @click="activeTab = 'recommendations'"
+        @click="handleTabChange('recommendations')"
       >
         智能推荐
+      </button>
+      <button 
+        :class="['tab-btn', { active: activeTab === 'ai-chat' }]"
+        @click="handleTabChange('ai-chat')"
+      >
+        <MessageCircle :size="16" />
+        AI 分析助手
       </button>
     </div>
     
@@ -167,24 +265,20 @@ onMounted(() => {
       
       <div class="stat-card">
         <div class="stat-header">
-          <Target :size="24" color="#11CDEF" />
-          <h3>平均任务时长</h3>
+          <TrendingUp :size="24" color="#2DCE89" />
+          <h3>任务完成率</h3>
         </div>
-        <p class="stat-value">
-          {{ statistics?.duration_preference?.average_duration_minutes || 0 }} 分钟
-        </p>
-        <p class="stat-desc">建议适时休息，保持专注力</p>
+        <p class="stat-value">{{ (statistics?.productivity?.completion_rate * 100 || 0).toFixed(1) }}%</p>
+        <p class="stat-desc">过去 30 天的平均完成率</p>
       </div>
       
       <div class="stat-card">
         <div class="stat-header">
-          <TrendingUp :size="24" color="#2DCE89" />
-          <h3>任务完成率</h3>
+          <Target :size="24" color="#F5365C" />
+          <h3>总任务数</h3>
         </div>
-        <p class="stat-value">
-          {{ ((statistics?.productivity?.completion_rate || 0) * 100).toFixed(1) }}%
-        </p>
-        <p class="stat-desc">继续保持良好的执行力！</p>
+        <p class="stat-value">{{ statistics?.productivity?.total_tasks || 0 }}</p>
+        <p class="stat-desc">过去 30 天创建的日程总数</p>
       </div>
     </div>
     
@@ -202,6 +296,63 @@ onMounted(() => {
         <p>暂无推荐，继续使用以获取更多智能建议吧！</p>
       </div>
     </div>
+    
+    <div v-if="activeTab === 'ai-chat'" class="ai-chat-container">
+      <div class="chat-header">
+        <div class="chat-title">
+          <Sparkles :size="20" color="#5E72E4" />
+          <h3>AI 日程分析助手</h3>
+        </div>
+        <button class="clear-btn" @click="clearChatHistory" title="清空对话历史">
+          <RefreshCw :size="18" />
+          <span>清空对话</span>
+        </button>
+      </div>
+      
+      <div class="chat-messages" ref="chatContainerRef">
+        <div v-for="(msg, index) in chatMessages" :key="index" :class="['message', msg.role]">
+          <div class="message-avatar">
+            <Sparkles v-if="msg.role === 'assistant'" :size="24" color="#5E72E4" />
+            <div v-else class="user-avatar">我</div>
+          </div>
+          <div class="message-content">
+            <p>{{ msg.message }}</p>
+            <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+          </div>
+        </div>
+        
+        <div v-if="isChatLoading" class="message assistant">
+          <div class="message-avatar">
+            <Sparkles :size="24" color="#5E72E4" />
+          </div>
+          <div class="message-content">
+            <div class="typing-indicator">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="chatMessages.length === 0 && !isChatLoading" class="empty-chat">
+          <Sparkles :size="48" color="#5E72E4" />
+          <p>正在分析您的日程数据...</p>
+        </div>
+      </div>
+      
+      <div class="chat-input-area">
+        <input 
+          v-model="newMessage"
+          @keyup.enter="sendMessage"
+          type="text"
+          placeholder="例如：我应该如何优化下周的工作安排？"
+          class="chat-input"
+        />
+        <button @click="sendMessage" class="send-btn" :disabled="!newMessage.trim() || isChatLoading">
+          <Send :size="20" />
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -212,7 +363,6 @@ onMounted(() => {
   padding: 2rem;
 }
 
-/* 新增：页面头部样式 */
 .page-header {
   display: flex;
   align-items: center;
@@ -243,7 +393,7 @@ onMounted(() => {
 
 h1 {
   color: #32325D;
-  margin-bottom: 2rem;
+  margin: 0;
 }
 
 .tabs {
@@ -262,6 +412,9 @@ h1 {
   color: #525F7F;
   border-bottom: 2px solid transparent;
   transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .tab-btn.active {
@@ -363,5 +516,227 @@ h1 {
   text-align: center;
   padding: 3rem;
   color: #8898aa;
+}
+
+.ai-chat-container {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11);
+  height: 650px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 2px solid #e9ecef;
+  background: linear-gradient(135deg, #f8f9fe 0%, #ffffff 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.chat-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chat-title h3 {
+  margin: 0;
+  color: #32325D;
+  font-size: 1.1rem;
+}
+
+.clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: white;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  color: #525F7F;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.clear-btn:hover {
+  background-color: #f8f9fe;
+  border-color: #5E72E4;
+  color: #5E72E4;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  background-color: #fafbfc;
+}
+
+.message {
+  display: flex;
+  gap: 1rem;
+  animation: fadeIn 0.3s ease;
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  flex-shrink: 0;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.message-content {
+  max-width: 70%;
+  background: white;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.message.user .message-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.message-content p {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.message-time {
+  display: block;
+  font-size: 0.75rem;
+  color: #8898aa;
+  margin-top: 0.5rem;
+}
+
+.message.user .message-time {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.chat-input-area {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  border-top: 2px solid #e9ecef;
+  background: white;
+  border-radius: 0 0 12px 12px;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.chat-input:focus {
+  border-color: #5E72E4;
+}
+
+.send-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.send-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+}
+
+.send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.typing-indicator span {
+  width: 8px;
+  height: 8px;
+  background: #8898aa;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.empty-chat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 4rem 2rem;
+  color: #8898aa;
+  text-align: center;
+}
+
+.empty-chat p {
+  margin: 0;
+  font-size: 1.1rem;
 }
 </style>
