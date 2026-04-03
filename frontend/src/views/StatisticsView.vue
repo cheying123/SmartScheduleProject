@@ -3,7 +3,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
-import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart } from 'lucide-vue-next'
+import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart, PlusCircle, MessageSquare, Trash2 } from 'lucide-vue-next'
 
 const API_URL = 'http://127.0.0.1:5000/api'
 const userStore = useUserStore()
@@ -23,6 +23,10 @@ const isChatLoading = ref(false)
 const sessionId = ref(null)
 const chatContainerRef = ref(null)
 const isAnalyzing = ref(false)
+
+// 对话管理相关
+const conversationSessions = ref([])
+const showConversationList = ref(false)
 
 function goBack() {
   router.push('/')
@@ -176,10 +180,89 @@ function formatTime(timeStr) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
+function formatDate(timeStr) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
 function clearChatHistory() {
-  if (confirm('确定要清空对话历史吗？')) {
+  if (confirm('确定要清空当前对话吗？')) {
     chatMessages.value = []
     sessionId.value = null
+  }
+}
+
+async function createNewConversation() {
+  chatMessages.value = []
+  sessionId.value = null
+  await loadSmartAnalysis()
+  showConversationList.value = false
+}
+
+async function loadConversationSessions() {
+  try {
+    const response = await axios.get(
+      `${API_URL}/ai/conversations`,
+      {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`
+        }
+      }
+    )
+    conversationSessions.value = response.data.sessions
+  } catch (error) {
+    console.error('加载会话列表失败:', error)
+  }
+}
+
+async function selectConversation(sessionIdToLoad) {
+  try {
+    const response = await axios.get(
+      `${API_URL}/ai/conversations/${sessionIdToLoad}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`
+        }
+      }
+    )
+    
+    sessionId.value = sessionIdToLoad
+    chatMessages.value = response.data.messages.map(msg => ({
+      role: msg.role,
+      message: msg.message,
+      created_at: msg.created_at
+    }))
+    
+    showConversationList.value = false
+  } catch (error) {
+    console.error('加载对话失败:', error)
+    alert('加载对话失败，请稍后再试')
+  }
+}
+
+async function deleteConversation(sessionIdToDelete) {
+  if (!confirm('确定要删除这个对话吗？')) return
+  
+  try {
+    await axios.delete(
+      `${API_URL}/ai/conversations/${sessionIdToDelete}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`
+        }
+      }
+    )
+    
+    if (sessionId.value === sessionIdToDelete) {
+      chatMessages.value = []
+      sessionId.value = null
+    }
+    
+    await loadConversationSessions()
+  } catch (error) {
+    console.error('删除对话失败:', error)
+    alert('删除对话失败，请稍后再试')
   }
 }
 
@@ -296,63 +379,114 @@ async function handleTabChange(tab) {
         <p>暂无推荐，继续使用以获取更多智能建议吧！</p>
       </div>
     </div>
-    
+  
     <div v-if="activeTab === 'ai-chat'" class="ai-chat-container">
       <div class="chat-header">
         <div class="chat-title">
           <Sparkles :size="20" color="#5E72E4" />
           <h3>AI 日程分析助手</h3>
         </div>
-        <button class="clear-btn" @click="clearChatHistory" title="清空对话历史">
-          <RefreshCw :size="18" />
-          <span>清空对话</span>
-        </button>
+        <div class="chat-actions">
+          <button class="action-btn" @click="createNewConversation" title="新建对话">
+            <PlusCircle :size="18" />
+            <span v-if="!showConversationList">新建对话</span>
+          </button>
+          <button class="action-btn" @click="loadConversationSessions(); showConversationList = !showConversationList" title="历史对话">
+            <MessageSquare :size="18" />
+            <span v-if="!showConversationList">历史对话</span>
+          </button>
+          <button class="action-btn" @click="clearChatHistory" title="清空对话">
+            <RefreshCw :size="18" />
+            <span v-if="!showConversationList">清空</span>
+          </button>
+        </div>
       </div>
       
-      <div class="chat-messages" ref="chatContainerRef">
-        <div v-for="(msg, index) in chatMessages" :key="index" :class="['message', msg.role]">
-          <div class="message-avatar">
-            <Sparkles v-if="msg.role === 'assistant'" :size="24" color="#5E72E4" />
-            <div v-else class="user-avatar">我</div>
+      <div class="chat-body-wrapper" :class="{ 'show-sidebar': showConversationList }">
+        <!-- 历史对话列表侧边栏 -->
+        <div class="conversation-sidebar" v-if="showConversationList">
+          <div class="sidebar-header">
+            <h4>历史对话</h4>
+            <button class="close-sidebar-btn" @click="showConversationList = false">×</button>
           </div>
-          <div class="message-content">
-            <p>{{ msg.message }}</p>
-            <span class="message-time">{{ formatTime(msg.created_at) }}</span>
-          </div>
-        </div>
-        
-        <div v-if="isChatLoading" class="message assistant">
-          <div class="message-avatar">
-            <Sparkles :size="24" color="#5E72E4" />
-          </div>
-          <div class="message-content">
-            <div class="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div class="conversation-list">
+            <div 
+              v-for="session in conversationSessions" 
+              :key="session.session_id"
+              class="conversation-item"
+              :class="{ active: session.session_id === sessionId }"
+              @click="selectConversation(session.session_id)"
+            >
+              <div class="conversation-info">
+                <div class="conversation-title">
+                  <MessageSquare :size="16" />
+                  <span>对话 {{ formatDate(session.last_message_time) }}</span>
+                </div>
+                <div class="conversation-time">
+                  {{ formatTime(session.last_message_time) }}
+                </div>
+              </div>
+              <button class="delete-conversation-btn" @click.stop="deleteConversation(session.session_id)" title="删除此对话">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            
+            <div v-if="conversationSessions.length === 0" class="empty-conversations">
+              <MessageSquare :size="32" color="#8898aa" />
+              <p>暂无历史对话</p>
             </div>
           </div>
         </div>
         
-        <div v-if="chatMessages.length === 0 && !isChatLoading" class="empty-chat">
-          <Sparkles :size="48" color="#5E72E4" />
-          <p>正在分析您的日程数据...</p>
+        <!-- 聊天主界面 -->
+        <div class="chat-main">
+          <div class="chat-messages" ref="chatContainerRef">
+            <div v-for="(msg, index) in chatMessages" :key="index" :class="['message', msg.role]">
+              <div class="message-avatar">
+                <Sparkles v-if="msg.role === 'assistant'" :size="24" color="#5E72E4" />
+                <div v-else class="user-avatar">我</div>
+              </div>
+              <div class="message-content">
+                <p>{{ msg.message }}</p>
+                <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+              </div>
+            </div>
+            
+            <div v-if="isChatLoading" class="message assistant">
+              <div class="message-avatar">
+                <Sparkles :size="24" color="#5E72E4" />
+              </div>
+              <div class="message-content">
+                <div class="typing-indicator">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
+            
+            <div v-if="chatMessages.length === 0 && !isChatLoading" class="empty-chat">
+              <Sparkles :size="48" color="#5E72E4" />
+              <p>正在分析您的日程数据...</p>
+            </div>
+          </div>
+          
+          <div class="chat-input-area">
+            <input 
+              v-model="newMessage"
+              @keyup.enter="sendMessage"
+              type="text"
+              placeholder="例如：我应该如何优化下周的工作安排？"
+              class="chat-input"
+            />
+            <button @click="sendMessage" class="send-btn" :disabled="!newMessage.trim() || isChatLoading">
+              <Send :size="20" />
+            </button>
+          </div>
         </div>
       </div>
-      
-      <div class="chat-input-area">
-        <input 
-          v-model="newMessage"
-          @keyup.enter="sendMessage"
-          type="text"
-          placeholder="例如：我应该如何优化下周的工作安排？"
-          class="chat-input"
-        />
-        <button @click="sendMessage" class="send-btn" :disabled="!newMessage.trim() || isChatLoading">
-          <Send :size="20" />
-        </button>
-      </div>
     </div>
+
   </div>
 </template>
 
@@ -547,6 +681,163 @@ h1 {
   margin: 0;
   color: #32325D;
   font-size: 1.1rem;
+}
+
+.chat-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: white;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  color: #525F7F;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.action-btn:hover {
+  background-color: #f8f9fe;
+  border-color: #5E72E4;
+  color: #5E72E4;
+}
+
+.chat-body-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.conversation-sidebar {
+  width: 300px;
+  background: #fafbfc;
+  border-right: 2px solid #e9ecef;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s ease;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.sidebar-header h4 {
+  margin: 0;
+  color: #32325D;
+  font-size: 1rem;
+}
+
+.close-sidebar-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #8898aa;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-sidebar-btn:hover {
+  color: #f5365c;
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.conversation-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.conversation-item:hover {
+  background: #f8f9fe;
+  border-color: #dee2e6;
+}
+
+.conversation-item.active {
+  background: #e3f2fd;
+  border-color: #5E72E4;
+}
+
+.conversation-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.conversation-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #32325D;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.conversation-time {
+  color: #8898aa;
+  font-size: 0.75rem;
+}
+
+.delete-conversation-btn {
+  background: none;
+  border: none;
+  color: #8898aa;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.delete-conversation-btn:hover {
+  background: #fee;
+  color: #f5365c;
+}
+
+.empty-conversations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  color: #8898aa;
+  text-align: center;
+}
+
+.empty-conversations p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .clear-btn {
