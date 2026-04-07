@@ -233,7 +233,13 @@ initEndTimeFromDB()
           >
           <span>设置结束时间</span>
         </label>
+        <!-- 新增提示文字 -->
+        <p v-if="!localEnableEndTime" class="hint-text">
+          💡 若不设置，系统将默认日程持续 <strong>1 小时</strong>
+        </p>
       </div>
+
+      
 
       <div v-if="hasEndTime" class="form-group fade-transition">
         <label for="end_time">结束时间</label>
@@ -467,4 +473,17 @@ initEndTimeFromDB()
     transform: translateY(0);
   }
 }
+
+.hint-text {
+  font-size: 0.85rem;
+  color: #8898aa;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-left: 2px;
+}
+
+.hint-text strong {
+  color: #5E72E4;
+}
+
 </style>

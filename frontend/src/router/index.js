@@ -3,6 +3,7 @@ import HomeView from '../views/HomeView.vue'
 import { useUserStore } from '../stores/user'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
+import CalendarView from '../views/CalendarView.vue' // ← 新增导入
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,6 +34,12 @@ const router = createRouter({
       name: 'statistics',
       component: () => import('../views/StatisticsView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/calendar',
+      name: 'calendar',
+      component: CalendarView,
+      meta: { requiresAuth: true } // ← 新增路由
     }
   ]
 })

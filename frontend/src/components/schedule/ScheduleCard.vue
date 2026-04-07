@@ -48,6 +48,16 @@ function formatTime(isoString) {
   const date = new Date(isoString)
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
+
+function getRecurringText(pattern) {
+  const map = {
+    'daily': '每日',
+    'weekly': '每周',
+    'monthly': '每月'
+  }
+  return map[pattern] || '重复'
+}
+
 </script>
 
 <template>
@@ -250,5 +260,15 @@ function formatTime(isoString) {
 .action-btn-delete:hover {
   background-color: #f44336;
   color: white;
+}
+
+.recurring-badge {
+  font-size: 0.75rem;
+  background-color: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-right: 8px;
+  font-weight: 600;
 }
 </style>

@@ -27,6 +27,8 @@ import NaturalLanguageInput from '@/components/schedule/NaturalLanguageInput.vue
 import ProfileCard from '@/components/profile/ProfileCard.vue'
 import ProfileForm from '@/components/profile/ProfileForm.vue'
 import NotificationList from '@/components/common/NotificationList.vue'
+import ConflictDialog from '@/components/schedule/ConflictDialog.vue'  // ← 新增这一行
+
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -120,17 +122,34 @@ async function forceCreateSchedule() {
   }
   
   try {
+    const response = await axios.post(`${API_URL}/schedules/force-create`, {
+      title: conflictDialog.value.parsed_data.title,
+      start_time: conflictDialog.value.parsed_data.start_time,
+      end_time: conflictDialog.value.parsed_data.end_time,
+      content: naturalLanguageInput.value,
+      priority: conflictDialog.value.parsed_data.priority || 1,
+      is_recurring: conflictDialog.value.parsed_data.is_recurring || false,
+      recurring_pattern: conflictDialog.value.parsed_data.recurring_pattern,
+      tags: conflictDialog.value.parsed_data.tags
+    }, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      }
+    })
+    
     // 关闭冲突对话框
     conflictDialog.value = null
     
-    // TODO: 调用后端 API 强制创建（需要后端支持）
-    // 或者提示用户修改时间
+    // 刷新日程列表
+    await fetchSchedules()
     
-    alert('功能开发中：您可以先手动调整时间，或者联系开发者添加"强制创建"功能')
+    // 显示成功通知
+    showNotification('success', '✅ 日程已创建（已忽略冲突）！')
     
   } catch (error) {
     console.error('强制创建失败:', error)
-    alert('创建失败，请重试')
+    const errorMsg = error.response?.data?.error || '创建失败，请重试'
+    showNotification('error', `❌ ${errorMsg}`)
   }
 }
 
@@ -570,6 +589,17 @@ onUnmounted(() => {
       </div>
     </transition>
 
+     <!-- 冲突解决对话框 -->  <!-- ← 从这里开始新增 -->
+    <transition name="fade">
+      <ConflictDialog
+        v-if="conflictDialog"
+        :conflict-data="conflictDialog"
+        :is-processing="isAIProcessing"
+        @confirm="forceCreateSchedule"
+        @cancel="() => { conflictDialog = null; naturalLanguageInput = '' }"
+      />
+    </transition>
+
     <!-- 通知提示 -->
     <transition name="slide-fade">
       <div v-if="notification.show" class="notification-toast" :class="notification.type">
@@ -583,51 +613,6 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- 冲突确认对话框 -->
-    <transition name="fade">
-      <div v-if="conflictDialog" class="form-overlay" @click.self="conflictDialog = null">
-        <div class="form-container conflict-dialog">
-          <h2>⚠️ 日程冲突提醒</h2>
-          
-          <div class="conflict-info">
-            <div class="new-schedule">
-              <h4>您想创建的日程：</h4>
-              <p class="schedule-title">{{ conflictDialog.parsed_data?.title }}</p>
-              <p class="schedule-time">
-                📅 {{ conflictDialog.parsed_data?.start_time }}
-                <span v-if="conflictDialog.parsed_data?.end_time">
-                  - {{ conflictDialog.parsed_data?.end_time }}
-                </span>
-              </p>
-            </div>
-            
-            <div class="existing-conflicts">
-              <h4>与以下日程冲突：</h4>
-              <div 
-                v-for="(conflict, index) in conflictDialog.conflicts" 
-                :key="index"
-                class="conflict-item"
-              >
-                <div class="conflict-header">
-                  <span class="conflict-icon">⛔</span>
-                  <strong>{{ conflict.title }}</strong>
-                </div>
-                <div class="conflict-time">
-                  🕐 {{ conflict.start_time }} - {{ conflict.end_time || '未设置结束时间' }}
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="form-actions">
-            <button type="button" class="btn-cancel" @click="conflictDialog = null">取消</button>
-            <button type="button" class="btn-submit btn-force-create" @click="forceCreateSchedule">
-              仍然创建
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
   </div>
 </template>
 

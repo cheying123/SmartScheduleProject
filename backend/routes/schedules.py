@@ -11,6 +11,7 @@ from services.conflict_detector import detect_schedule_conflicts
 from services.weather_service import get_weather_for_date, get_weather_with_alerts
 from services.conflict_detector import detect_schedule_conflicts
 from services.countdown_service import CountdownService
+from services.recurring_service import RecurringService  # ← 新增导入
 
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 
@@ -18,7 +19,14 @@ schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 @schedules_bp.route('', methods=['GET'])
 @token_required
 def get_schedules(current_user):
-    """获取当前用户的所有日程，并自动更新天气信息"""
+    """获取当前用户的所有日程，并自动更新天气信息，自动更新过期重复日程"""
+
+    # ⚡ 核心改动：在返回数据前，先执行重复日程检查
+    try:
+        RecurringService.process_recurring_schedules()
+    except Exception as e:
+        print(f"⚠️ 自动更新重复日程失败: {e}")
+
     from datetime import datetime, timedelta
     
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.start_time.asc()).all()
@@ -368,3 +376,76 @@ def check_conflict(current_user):
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+
+@schedules_bp.route('/force-create', methods=['POST'])
+@token_required
+def force_create_schedule(current_user):
+    """强制创建日程（忽略冲突）"""
+    data = request.get_json()
+    
+    if not data or 'title' not in data or 'start_time' not in data:
+        return jsonify({'error': '缺少必要参数 title 或 start_time'}), 400
+    
+    try:
+        # 解析时间
+        local_dt = datetime.fromisoformat(data['start_time'].replace('Z', ''))
+        
+        # 处理结束时间
+        end_time = None
+        if data.get('end_time') and data['end_time'].strip():
+            end_time = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+        elif data.get('end_time') == '':
+            end_time = None
+        else:
+            end_time = local_dt + timedelta(hours=1)
+        
+        # 创建日程（不检查冲突）
+        new_schedule = Schedule(
+            user_id=current_user.id,
+            title=data['title'],
+            content=data.get('content', ''),
+            start_time=local_dt,
+            end_time=end_time,
+            weather_info=None,
+            priority=data.get('priority', 1),
+            is_recurring=data.get('is_recurring', False),
+            recurring_pattern=data.get('recurring_pattern'),
+            tags=data.get('tags')
+        )
+        
+        db.session.add(new_schedule)
+        
+        # 如果是未来 7 天内的日程，更新天气
+        schedule_date = local_dt.strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')
+        target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+        today_date = datetime.strptime(today, '%Y-%m-%d')
+        days_diff = (target_date - today_date).days
+        
+        if 0 <= days_diff <= 7:
+            city_location_id = current_user.location or "101010100"
+            try:
+                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
+                if weather_result:
+                    new_schedule.weather_info = weather_result['weather_text']
+                    print(f"✓ 强制创建 - 更新天气成功：{schedule_date}")
+            except Exception as e:
+                print(f"✗ 强制创建 - 更新天气失败 {schedule_date}: {e}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': '日程创建成功（已忽略冲突）',
+            'schedule': new_schedule.to_dict(),
+            'conflict_ignored': True
+        }), 201
+        
+    except ValueError as e:
+        return jsonify({'error': f'时间格式错误：{str(e)}'}), 400
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ 强制创建失败：{str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500

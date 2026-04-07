@@ -14,6 +14,8 @@ from routes.weather import weather_bp
 from routes.location import location_bp  # 新增
 from routes.analytics import analytics_bp  # 新增导入
 from routes.ai import ai_bp
+from apscheduler.schedulers.background import BackgroundScheduler  # ← 新增导入
+from services.recurring_service import RecurringService  # ← 新增导入
 
 
 def create_app():
@@ -26,7 +28,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt = JWTManager(app)  # 新增：初始化 JWTManager
     
-        # CORS 配置 - 只允许一个 origin，避免重复
+    # CORS 配置 - 只允许一个 origin，避免重复
     cors.init_app(
         app, 
         resources={r"/api/*": {"origins": "*"}}, 
@@ -49,6 +51,28 @@ def create_app():
     app.register_blueprint(analytics_bp)  # 新增：注册分析蓝图
     app.register_blueprint(ai_bp) # AI 分析助手（使用 ANALYSIS_AI_* 配置）
     
+    # ⚙️ 启动定时任务：每天凌晨 00:01 检查重复日程
+    scheduler = BackgroundScheduler()
+
+    # 修复：使用 app.app_context() 包装任务，确保数据库操作有上下文
+    def job_wrapper():
+        with app.app_context():
+            try:
+                RecurringService.process_recurring_schedules()
+            except Exception as e:
+                print(f"❌ 定时任务执行失败: {e}")
+
+
+    scheduler.add_job(
+        func=job_wrapper,  # ← 这里要改成 job_wrapper，不能直接传 RecurringService...
+        trigger="cron",
+        hour=0,
+        minute=1,
+        id='recurring_schedule_job',
+        replace_existing=True
+    )
+    scheduler.start()
+
     # 根路由
     @app.route('/')
     def index():

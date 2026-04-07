@@ -1,5 +1,6 @@
 <script setup>
 import { Calendar, User, Bell, Settings, LogOut, BarChart } from 'lucide-vue-next'
+import { useRouter } from 'vue-router' // ← 新增导入
 import { NAVIGATION } from '@/constants'
 
 const props = defineProps({
@@ -22,6 +23,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggle-collapse', 'tab-change', 'logout'])
+const router = useRouter() // ← 新增
 
 function handleTabChange(tab) {
   emit('tab-change', tab)
@@ -31,6 +33,9 @@ function handleLogout() {
   emit('logout')
 }
 
+function goToCalendar() {
+  router.push('/calendar') // ← 新增跳转逻辑
+}
 
 // 安全获取用户名的首字母
 function getUserInitial() {
@@ -57,6 +62,16 @@ function getUserInitial() {
       >
         <Calendar :size="20" />
         <span v-if="!isCollapsed">你的日程</span>
+      </a>
+
+      <!-- 新增：日历视图导航项 -->
+      <a 
+        href="#" 
+        class="nav-item"
+        @click.prevent="goToCalendar"
+      >
+        <Calendar :size="20" />
+        <span v-if="!isCollapsed">日历视图</span>
       </a>
       
       <a 

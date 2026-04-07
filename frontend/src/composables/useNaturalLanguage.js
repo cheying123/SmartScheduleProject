@@ -64,37 +64,16 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
       if (error.response?.status === 409) {
         const conflictData = error.response.data
         
-        let conflictMsg = `⚠️ 检测到日程冲突！\n\n`
-        conflictMsg += `您想创建：${conflictData.parsed_data?.title || '新日程'}\n`
-        conflictMsg += `时间：${conflictData.parsed_data?.start_time || '未知'}\n\n`
-        conflictMsg += `但与以下已有日程冲突：\n`
+        // 存储冲突数据，由父组件显示对话框
+        conflictDialog.value = conflictData
         
-        conflictData.conflicts?.forEach((conflict, index) => {
-          conflictMsg += `\n${index + 1}. ${conflict.title}\n`
-          conflictMsg += `   时间：${conflict.start_time} - ${conflict.end_time || '未设置'}\n`
-        })
-        
-        conflictMsg += `\n您确定还要创建吗？`
-        
-        // 先重置处理状态
+        // 重置处理状态
         isProcessingNL.value = false
         
-        if (confirm(conflictMsg)) {
-          conflictDialog.value = conflictData
-          return { 
-            success: false, 
-            type: 'conflict', 
-            data: conflictData 
-          }
-        } else {
-          // 用户取消，关闭对话框并清空输入
-          conflictDialog.value = null
-          naturalLanguageInput.value = ''
-          isNaturalLanguageMode.value = false
-          return { 
-            success: false, 
-            type: 'conflict_cancelled' 
-          }
+        return { 
+          success: false, 
+          type: 'conflict', 
+          data: conflictData 
         }
       } else {
         // 其他错误也要重置状态
