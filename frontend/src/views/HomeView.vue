@@ -177,6 +177,7 @@ const currentTimezone = ref('')
 const isLogoutModalVisible = ref(false)
 const createMode = ref(CREATE_MODES.FORM)
 const isFormVisible = ref(false)
+const searchQuery = ref('')
 const notification = ref({
   show: false,
   type: 'success',
@@ -185,9 +186,83 @@ const notification = ref({
 })
 
 // 计算属性
+const filteredSchedules = computed(() => {
+  if (!searchQuery.value.trim()) {
+    return schedules.value
+  }
+  
+  const query = searchQuery.value.toLowerCase().trim()
+  
+  // 模糊搜索函数：检查 query 中的字符是否按顺序出现在 text 中
+  const fuzzyMatch = (text, query) => {
+    if (!text) return false
+    text = text.toLowerCase()
+    
+    let queryIndex = 0
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+      if (text[i] === query[queryIndex]) {
+        queryIndex++
+      }
+    }
+    return queryIndex === query.length
+  }
+  
+  return schedules.value.filter(schedule => 
+    fuzzyMatch(schedule.title, query) ||
+    (schedule.content && fuzzyMatch(schedule.content, query))
+  )
+})
+
+// 将日程分为未过期和已过期两组
+const upcomingSchedules = computed(() => {
+  const now = new Date()
+  return filteredSchedules.value.filter(schedule => {
+    const scheduleDate = new Date(schedule.start_time)
+    return scheduleDate >= now
+  })
+})
+
+const pastSchedules = computed(() => {
+  const now = new Date()
+  return filteredSchedules.value.filter(schedule => {
+    const scheduleDate = new Date(schedule.start_time)
+    return scheduleDate < now
+  })
+})
+
+// 按日期分组 - 未过期日程
+const groupedUpcomingSchedules = computed(() => {
+  const groups = {}
+  upcomingSchedules.value.forEach(schedule => {
+    const date = new Date(schedule.start_time).toLocaleDateString('zh-CN', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    })
+    if (!groups[date]) groups[date] = []
+    groups[date].push(schedule)
+  })
+  return groups
+})
+
+// 按日期分组 - 已过期日程
+const groupedPastSchedules = computed(() => {
+  const groups = {}
+  pastSchedules.value.forEach(schedule => {
+    const date = new Date(schedule.start_time).toLocaleDateString('zh-CN', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    })
+    if (!groups[date]) groups[date] = []
+    groups[date].push(schedule)
+  })
+  return groups
+})
+
 const groupedSchedules = computed(() => {
   const groups = {}
-  schedules.value.forEach(schedule => {
+  filteredSchedules.value.forEach(schedule => {
     const date = new Date(schedule.start_time).toLocaleDateString('zh-CN', { 
       year: 'numeric', 
       month: 'long', 
@@ -358,6 +433,19 @@ onUnmounted(() => {
         <h1>{{ getTabTitle() }}</h1>
         <div class="top-bar-actions">
           <span class="current-time">{{ currentTimezone }}</span>
+
+          <!-- 搜索框 -->
+          <div v-if="activeTab === 'schedule'" class="search-container">
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              placeholder="搜索日程..." 
+              class="search-input"
+            />
+            <span v-if="searchQuery" class="clear-search" @click="searchQuery = ''">×</span>
+          </div>
+
+
           <button 
             v-if="activeTab === 'schedule'"
             class="add-btn-top" 
@@ -372,10 +460,14 @@ onUnmounted(() => {
       <!-- 日程页面 -->
       <div v-if="activeTab === 'schedule'" class="tab-content">
         <ScheduleList
-          :schedules="schedules"
+          :schedules="filteredSchedules"
+          :upcomingSchedules="upcomingSchedules"
+          :pastSchedules="pastSchedules"
+          :groupedUpcomingSchedules="groupedUpcomingSchedules"
+          :groupedPastSchedules="groupedPastSchedules"
           :isLoading="isLoading"
           :error="error"
-          :groupedSchedules="groupedSchedules"
+          :searchQuery="searchQuery"
           @edit="openEditModal"
           @delete="deleteSchedule"
         />
@@ -654,6 +746,50 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  padding: 0.6rem 2.5rem 0.6rem 1rem;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  width: 250px;
+  transition: all 0.2s;
+  background-color: #f8f9fe;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #5E72E4;
+  background-color: white;
+  box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.1);
+}
+
+.search-input::placeholder {
+  color: #adb5bd;
+}
+
+.clear-search {
+  position: absolute;
+  right: 10px;
+  cursor: pointer;
+  color: #adb5bd;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.clear-search:hover {
+  background-color: #e9ecef;
+  color: #32325D;
 }
 
 .current-time {
