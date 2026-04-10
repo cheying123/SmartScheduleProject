@@ -212,3 +212,28 @@ def delete_session(session_id):
         db.session.rollback()
         print(f"❌ 删除会话失败：{str(e)}")
         return jsonify({'error': str(e)}), 500
+    
+
+@ai_bp.route('/chat', methods=['POST'])
+@jwt_required()
+def ai_chat():
+    """AI 对话接口，支持日程查询和闲聊"""
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+        user_message = data.get('message', '')
+        
+        if not user_message:
+            return jsonify({'error': '消息不能为空'}), 400
+
+        # 调用 AI 服务生成回复
+        response_text = ai_service.chat_with_context(current_user_id, user_message)
+        
+        return jsonify({
+            'reply': response_text,
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ AI 聊天失败：{str(e)}")
+        return jsonify({'error': str(e)}), 500

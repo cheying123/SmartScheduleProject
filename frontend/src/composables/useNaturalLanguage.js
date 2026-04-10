@@ -203,6 +203,110 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     naturalLanguageInput.value = ''
   }
 
+
+  /**
+   * 语音合成工具函数 (Text-to-Speech)
+   * 实现任务书中的“多模态反馈”
+   */
+  function speak(text, priority = false) {
+    if ('speechSynthesis' in window) {
+      // 如果是高优先级（如冲突警告），强制打断当前播报
+      if (priority) {
+        window.speechSynthesis.cancel()
+      } else if (window.speechSynthesis.speaking && !priority) {
+        // 普通消息排队，不强行打断
+        return 
+      }
+      
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = 'zh-CN'
+      utterance.rate = 1.1 // 稍微快一点，更像助手
+      utterance.pitch = 1.0
+      window.speechSynthesis.speak(utterance)
+    }
+  }
+
+  /**
+   * 简单的音效反馈 (Web Audio API)
+   */
+  function playSound(type = 'success') {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      const oscillator = audioCtx.createOscillator()
+      const gainNode = audioCtx.createGain()
+      
+      oscillator.connect(gainNode)
+      gainNode.connect(audioCtx.destination)
+      
+      if (type === 'success') {
+        oscillator.type = 'sine'
+        oscillator.frequency.setValueAtTime(500, audioCtx.currentTime)
+        oscillator.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.1)
+      } else if (type === 'error') {
+        oscillator.type = 'sawtooth'
+        oscillator.frequency.setValueAtTime(200, audioCtx.currentTime)
+        oscillator.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.2)
+      }
+      
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3)
+      
+      oscillator.start()
+      oscillator.stop(audioCtx.currentTime + 0.3)
+    } catch (e) {
+      console.error('音效播放失败', e)
+    }
+  }
+
+  async function parseAndCreate(inputText) {
+    if (!inputText || !inputText.trim()) {
+      error.value = '请输入内容'
+      return null
+    }
+
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      const response = await axios.post(
+        `${API_URL}/schedules/nlp-parse`,
+        { text: inputText },
+        { 
+          headers: { 
+            'Authorization': `Bearer ${userStore.token}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      )
+      
+      const scheduleData = response.data
+      
+      // ✅ 增强反馈：音效 + 语音 + 视觉（通过返回值通知父组件高亮）
+      playSound('success')
+      const timeStr = new Date(scheduleData.start_time).toLocaleString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+      speak(`好的，已为您安排${scheduleData.title}，时间是${timeStr}`)
+      
+      return scheduleData
+    } catch (err) {
+      console.error('NLP 解析失败:', err)
+      const errMsg = err.response?.data?.error || '智能解析失败，请尝试手动输入'
+      error.value = errMsg
+      
+      // ✅ 错误反馈：音效 + 语音
+      playSound('error')
+      speak('抱歉，我没听懂，请您再说清楚一点', true)
+      
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   onUnmounted(() => {
     if (recordingTimer.value) {
       clearInterval(recordingTimer.value)

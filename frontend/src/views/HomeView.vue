@@ -1,9 +1,9 @@
 
 
 <script setup>
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted,watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart,Sparkles, Search } from 'lucide-vue-next'
 
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
@@ -28,6 +28,7 @@ import ProfileCard from '@/components/profile/ProfileCard.vue'
 import ProfileForm from '@/components/profile/ProfileForm.vue'
 import NotificationList from '@/components/common/NotificationList.vue'
 import ConflictDialog from '@/components/schedule/ConflictDialog.vue'  // ← 新增这一行
+
 
 
 const router = useRouter()
@@ -115,6 +116,18 @@ const {
   handleCancelClick
 } = useNaturalLanguage(API_URL, fetchSchedules)
 
+// ✅ 新增：定义本地播报函数，解决模板中找不到 speak 的问题
+function handleSpeak(text) {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel() // 停止之前的播报
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'zh-CN'
+    window.speechSynthesis.speak(utterance)
+  } else {
+    alert('您的浏览器不支持语音播报')
+  }
+}
+
 // 强制创建日程（忽略冲突）
 async function forceCreateSchedule() {
   if (!conflictDialog.value?.parsed_data) {
@@ -184,6 +197,8 @@ const notification = ref({
   message: '',
   duration: 3000
 })
+
+const dailyBriefing = ref(null)
 
 // 计算属性
 const filteredSchedules = computed(() => {
@@ -385,9 +400,30 @@ function goToStatistics() {
   router.push('/statistics')
 }
 
+// 监听用户信息变化，更新标题
+watch(() => userStore.user, (newUser) => {
+  if (newUser?.username) {
+    document.title = `${newUser.username} - 我的日程`
+  }
+}, { immediate: true })
+
 // 生命周期
 onMounted(async () => {
   currentTimezone.value = getTimezoneInfo()
+
+   // 获取每日简报
+  try {
+    const res = await axios.get(`${API_URL}/assistant/daily-briefing`, {
+      headers: { 'Authorization': `Bearer ${userStore.token}` }
+    })
+    dailyBriefing.value = res.data
+    // ✅ 多模态：进入首页时，如果有关键建议，可以轻声播报
+    if (res.data.ai_advice) {
+      speak(res.data.ai_advice) 
+    }
+  } catch (e) {
+    console.error('获取简报失败', e)
+  }
   
   if (!userStore.user && userStore.token) {
     try {
@@ -395,6 +431,9 @@ onMounted(async () => {
         headers: { 'Authorization': `Bearer ${userStore.token}` }
       })
       userStore.user = response.data
+      
+      // 用户信息加载完成后更新标题
+      document.title = `${userStore.user.username} - 我的日程`
     } catch (error) {
       console.error('恢复用户信息失败:', error)
       if (error.response?.status === 401) {
@@ -402,11 +441,15 @@ onMounted(async () => {
         window.location.href = '/login'
       }
     }
+  } else if (userStore.user?.username) {
+    // 如果用户信息已存在，也更新标题
+    document.title = `${userStore.user.username} - 我的日程`
   }
   
   fetchSchedules(API_URL)
   loadRecommendations()
 })
+
 
 onUnmounted(() => {
   stopRecording()
@@ -459,12 +502,37 @@ onUnmounted(() => {
 
       <!-- 日程页面 -->
       <div v-if="activeTab === 'schedule'" class="tab-content">
+        <!-- ✅ 新增：每日智能简报卡片 -->
+      <div v-if="dailyBriefing" class="briefing-card">
+        <div class="briefing-header">
+          <Sparkles :size="20" color="#5E72E4" />
+          <h3>早安！这是您今天的智能简报</h3>
+          <button class="replay-btn" @click="handleSpeak(dailyBriefing.ai_advice)">
+            🔊 重播建议
+          </button>
+        </div>
+        <div class="briefing-content">
+          <p class="ai-advice">"{{ dailyBriefing.ai_advice }}"</p>
+          <div class="briefing-details">
+            <span class="detail-item">
+              <Calendar :size="16" /> 今日日程：{{ dailyBriefing.schedule_count }} 项
+            </span>
+            <span class="detail-item" v-if="dailyBriefing.weather && dailyBriefing.weather.text !== '未知'">
+              <Sun :size="16" /> {{ dailyBriefing.weather.text }} {{ dailyBriefing.weather.temperature }}°C
+            </span>
+            <span v-else class="detail-item" style="color: #ff9800;">
+              ⚠️ 天气信息暂不可用
+            </span>
+          </div>
+        </div>
+      </div>
         <ScheduleList
           :schedules="filteredSchedules"
           :upcomingSchedules="upcomingSchedules"
           :pastSchedules="pastSchedules"
           :groupedUpcomingSchedules="groupedUpcomingSchedules"
           :groupedPastSchedules="groupedPastSchedules"
+          :groupedSchedules="groupedSchedules"
           :isLoading="isLoading"
           :error="error"
           :searchQuery="searchQuery"
@@ -709,6 +777,56 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* ✅ 新增：简报卡片样式 */
+.briefing-card {
+  background: linear-gradient(135deg, #f6f9fc 0%, #eef2f9 100%);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 24px;
+  border: 1px solid #e6e9f0;
+  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.08);
+  transition: all 0.3s ease;
+}
+
+.briefing-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(94, 114, 228, 0.12);
+}
+
+.briefing-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: #5E72E4;
+}
+
+.briefing-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.ai-advice {
+  font-size: 1rem;
+  color: #32325d;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  font-style: italic;
+}
+
+.briefing-details {
+  display: flex;
+  gap: 16px;
+  font-size: 0.9rem;
+  color: #8898aa;
+}
+
+.detail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ===== 主布局样式 ===== */
 .home-container {
   display: flex;
@@ -1369,5 +1487,22 @@ onUnmounted(() => {
   50% {
     background-color: #fff3cd;
   }
+}
+
+
+.replay-btn {
+  background: none;
+  border: 1px solid #5E72E4;
+  color: #5E72E4;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+.replay-btn:hover {
+  background-color: #5E72E4;
+  color: white;
 }
 </style>

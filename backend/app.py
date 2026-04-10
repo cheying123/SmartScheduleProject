@@ -16,12 +16,17 @@ from routes.analytics import analytics_bp  # 新增导入
 from routes.ai import ai_bp
 from apscheduler.schedulers.background import BackgroundScheduler  # ← 新增导入
 from services.recurring_service import RecurringService  # ← 新增导入
+from routes.assistant import assistant_bp # 确保引入了新创建的蓝图
 
 
 def create_app():
     """应用工厂函数"""
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # ✅ 新增：在生产环境或调试时屏蔽 print 输出
+    if os.getenv('SUPPRESS_PRINTS') == 'True':
+        sys.stdout = open(os.devnull, 'w')
     
     # 初始化扩展
     db.init_app(app)
@@ -44,6 +49,7 @@ def create_app():
     # 注册蓝图
     app.register_blueprint(auth_bp)
     app.register_blueprint(schedules_bp)
+    app.register_blueprint(assistant_bp, url_prefix='/api/assistant') # ✅ 确保这一行存在
     app.register_blueprint(users_bp)
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(weather_bp)

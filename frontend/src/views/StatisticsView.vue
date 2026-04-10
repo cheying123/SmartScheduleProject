@@ -1,9 +1,10 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
-import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart, PlusCircle, MessageSquare, Trash2 } from 'lucide-vue-next'
+import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart, PlusCircle, MessageSquare, Trash2, Award, Zap, Activity, PieChart, Layers } from 'lucide-vue-next'
+
 
 const API_URL = 'http://127.0.0.1:5000/api'
 const userStore = useUserStore()
@@ -49,14 +50,17 @@ async function loadStatistics() {
 
 async function loadRecommendations() {
   try {
-    const response = await axios.get(`${API_URL}/analytics/recommendations`, {
+    // 使用 AI 接口获取深度推荐
+    const response = await axios.get(`${API_URL}/ai/recommendations`, {
       headers: {
         'Authorization': `Bearer ${userStore.token}`
       }
     })
-    recommendations.value = response.data.recommendations
+    recommendations.value = response.data.recommendations || []
   } catch (error) {
-    console.error('加载推荐失败:', error)
+    console.error('加载 AI 推荐失败:', error)
+    // 如果 AI 接口失败，可以回退到旧的统计推荐，或者显示错误提示
+    recommendations.value = []
   }
 }
 
@@ -278,16 +282,147 @@ const busyDaysText = computed(() => {
   return days.map(d => weekdayMap[d]).join(',')
 })
 
+
+
+
+
+// 新增计算属性 - 任务时长分析
+const avgDurationText = computed(() => {
+  if (!statistics.value?.duration_preference) return '暂无数据'
+  const minutes = statistics.value.duration_preference.average_duration_minutes
+  if (minutes < 60) {
+    return `${Math.round(minutes)} 分钟`
+  }
+  const hours = Math.floor(minutes / 60)
+  const mins = Math.round(minutes % 60)
+  return mins > 0 ? `${hours} 小时 ${mins} 分钟` : `${hours} 小时`
+})
+
+// 优先级分布文本 (修复版)
+const priorityDistributionText = computed(() => {
+  if (!statistics.value?.priority_distribution) return []
+  
+  const rawData = statistics.value.priority_distribution
+  // 兼容后端可能返回的不同结构
+  const distribution = rawData.distribution || rawData.Pdistribution || {}
+  
+  if (Object.keys(distribution).length === 0) return []
+  
+  const total = Object.values(distribution).reduce((sum, count) => sum + Number(count), 0)
+  if (total === 0) return []
+  
+  const priorityLabels = {
+    1: '普通',
+    2: '一般', 
+    3: '重要',
+    4: '紧急',
+    5: '非常重要'
+  }
+  
+  const priorityColors = {
+    1: '#94a3b8', // Slate
+    2: '#3b82f6', // Blue
+    3: '#f59e0b', // Amber
+    4: '#ef4444', // Red
+    5: '#7c3aed'  // Violet
+  }
+
+  return Object.entries(distribution).map(([priority, count]) => ({
+    label: priorityLabels[priority] || `P${priority}`,
+    count: Number(count),
+    percentage: ((Number(count) / total) * 100).toFixed(1),
+    color: priorityColors[priority] || '#cbd5e1'
+  })).sort((a, b) => b.count - a.count)
+})
+
+
+// 获取优先级颜色
+function getPriorityColor(priority) {
+  const colors = {
+    1: '#9e9e9e',
+    2: '#42a5f5',
+    3: '#ffa726',
+    4: '#ef5350',
+    5: '#c62828'
+  }
+  return colors[priority] || '#9e9e9e'
+}
+
+// 计算每日平均任务数
+const dailyAverageTasks = computed(() => {
+  if (!statistics.value?.weekly_pattern) return 0
+  return statistics.value.weekly_pattern.average_tasks_per_day || 0
+})
+
+// 周模式详细数据
+const weeklyPatternData = computed(() => {
+  if (!statistics.value?.weekly_pattern?.day_distribution) return []
+  
+  const distribution = statistics.value.weekly_pattern.day_distribution
+  return weekdayMap.map((day, index) => ({
+    day,
+    count: distribution[index] || 0,
+    isBusy: statistics.value.weekly_pattern.busy_days.includes(index)
+  }))
+})
+
+// 高效时段分布数据（用于图表）
+const productivityChartData = computed(() => {
+  if (!statistics.value?.productivity?.distribution) return []
+  
+  const distribution = statistics.value.productivity.distribution
+  const maxCount = Math.max(...Object.values(distribution), 1)
+  
+  return Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    count: distribution[hour] || 0,
+    percentage: ((distribution[hour] || 0) / maxCount * 100).toFixed(0)
+  }))
+})
+
+// 监听用户信息变化，更新标题
+watch(() => userStore.user, (newUser) => {
+  if (newUser?.username) {
+    document.title = `${newUser.username} - 统计分析`
+  }
+}, { immediate: true })
+
+// 获取推荐类型图标
+function getRecommendationTypeIcon(type) {
+  const icons = {
+    '时间偏好': '⏰',
+    '日程平衡': '⚖️',
+    '效率提升': '🚀',
+    '习惯养成': '🎯',
+    'AI 洞察': '🤖'
+  }
+  return icons[type] || '💡'
+}
+
 onMounted(async () => {
+  // 设置页面标题
+  if (userStore.user?.username) {
+    document.title = `${userStore.user.username} - 统计分析`
+  }
+  
   await loadStatistics()
   await loadRecommendations()
 })
 
 async function handleTabChange(tab) {
   activeTab.value = tab
+  
   if (tab === 'ai-chat' && chatMessages.value.length === 0) {
     await loadSmartAnalysis()
   }
+  
+  // 当切换到推荐页且数据为空时，触发 AI 推荐加载
+  if (tab === 'recommendations' && recommendations.value.length === 0) {
+    isLoading.value = true
+    await loadRecommendations()
+    isLoading.value = false
+  }
+  
   await nextTick()
   if (chatContainerRef.value) {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
@@ -328,57 +463,201 @@ async function handleTabChange(tab) {
     </div>
     
     <div v-if="activeTab === 'overview'" class="overview-content">
-      <div class="stat-card">
-        <div class="stat-header">
-          <Clock :size="24" color="#5E72E4" />
-          <h3>高效时段</h3>
+      <!-- 核心指标卡片 -->
+      <div class="stats-grid">
+        <div class="stat-card primary">
+          <div class="stat-icon">
+            <Target :size="28" />
+          </div>
+          <div class="stat-info">
+            <h3>总任务数</h3>
+            <p class="stat-value">{{ statistics?.productivity?.total_tasks || 0 }}</p>
+            <p class="stat-desc">过去 30 天创建的日程</p>
+          </div>
         </div>
-        <p class="stat-value">{{ productiveHoursText }}</p>
-        <p class="stat-desc">基于过去 30 天的日程数据分析</p>
+        
+        <div class="stat-card success">
+          <div class="stat-icon">
+            <TrendingUp :size="28" />
+          </div>
+          <div class="stat-info">
+            <h3>完成率</h3>
+            <p class="stat-value">{{ (statistics?.productivity?.completion_rate * 100 || 0).toFixed(1) }}%</p>
+            <p class="stat-desc">任务完成比例</p>
+          </div>
+        </div>
+        
+        <div class="stat-card warning">
+          <div class="stat-icon">
+            <Clock :size="28" />
+          </div>
+          <div class="stat-info">
+            <h3>日均任务</h3>
+            <p class="stat-value">{{ dailyAverageTasks.toFixed(1) }}</p>
+            <p class="stat-desc">平均每天的任务数</p>
+          </div>
+        </div>
+        
+        <div class="stat-card info">
+          <div class="stat-icon">
+            <Activity :size="28" />
+          </div>
+          <div class="stat-info">
+            <h3>平均时长</h3>
+            <p class="stat-value">{{ avgDurationText }}</p>
+            <p class="stat-desc">单个任务持续时间</p>
+          </div>
+        </div>
       </div>
-      
-      <div class="stat-card">
-        <div class="stat-header">
-          <Calendar :size="24" color="#FB6340" />
-          <h3>繁忙日期</h3>
+
+      <!-- 高效时段分析 -->
+      <div class="analysis-section">
+        <div class="section-header">
+          <Zap :size="20" />
+          <h3>高效时段分析</h3>
         </div>
-        <p class="stat-value">{{ busyDaysText }}</p>
-        <p class="stat-desc">这些天的日程安排较为密集</p>
+        <div class="chart-container">
+          <div class="productivity-chart">
+            <div v-for="item in productivityChartData" :key="item.hour" 
+                 class="chart-bar-wrapper">
+              <div class="chart-bar" 
+                   :style="{ height: item.percentage + '%' }"
+                   :class="{ 'peak-hour': statistics?.productivity?.productive_hours?.includes(item.hour) }"
+                   :title="`${item.hour}点: ${item.count}个任务`">
+              </div>
+              <span class="chart-label">{{ item.hour }}</span>
+            </div>
+          </div>
+          <div class="chart-legend">
+            <div class="legend-item">
+              <span class="legend-color peak"></span>
+              <span>高效时段（Top 3）</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-color normal"></span>
+              <span>其他时段</span>
+            </div>
+          </div>
+        </div>
+        <div class="insight-box">
+          <Award :size="18" />
+          <p>您的高效时段是：<strong>{{ productiveHoursText }}</strong>，建议将重要任务安排在这些时间段。</p>
+        </div>
       </div>
-      
-      <div class="stat-card">
-        <div class="stat-header">
-          <TrendingUp :size="24" color="#2DCE89" />
-          <h3>任务完成率</h3>
+
+      <!-- 周模式分析 -->
+      <div class="analysis-section">
+        <div class="section-header">
+          <Calendar :size="20" />
+          <h3>周模式分析</h3>
         </div>
-        <p class="stat-value">{{ (statistics?.productivity?.completion_rate * 100 || 0).toFixed(1) }}%</p>
-        <p class="stat-desc">过去 30 天的平均完成率</p>
+        <div class="weekly-pattern-grid">
+          <div v-for="item in weeklyPatternData" :key="item.day" 
+               class="weekday-card"
+               :class="{ 'busy-day': item.isBusy }">
+            <div class="weekday-name">{{ item.day }}</div>
+            <div class="weekday-count">{{ item.count }}</div>
+            <div class="weekday-bar" :style="{ width: (item.count / Math.max(...weeklyPatternData.map(d => d.count)) * 100) + '%' }"></div>
+          </div>
+        </div>
+        <div class="insight-box">
+          <Layers :size="18" />
+          <p>您最繁忙的日子是：<strong>{{ busyDaysText }}</strong>，这些天的日程较为密集。</p>
+        </div>
       </div>
-      
-      <div class="stat-card">
-        <div class="stat-header">
-          <Target :size="24" color="#F5365C" />
-          <h3>总任务数</h3>
+
+      <!-- 优先级分布统计 -->
+      <div class="analysis-section">
+        <div class="section-header">
+          <Target :size="20" />
+          <h3>优先级分布</h3>
         </div>
-        <p class="stat-value">{{ statistics?.productivity?.total_tasks || 0 }}</p>
-        <p class="stat-desc">过去 30 天创建的日程总数</p>
+        
+        <div v-if="priorityDistributionText.length > 0" class="priority-stats-container">
+          <div v-for="item in priorityDistributionText" :key="item.label" class="priority-stat-row">
+            <div class="priority-label-col">
+              <span class="priority-dot" :style="{ backgroundColor: item.color }"></span>
+              <span class="priority-name">{{ item.label }}</span>
+            </div>
+            
+            <div class="priority-bar-area">
+              <div class="progress-track">
+                <div class="progress-fill" 
+                     :style="{ width: item.percentage + '%', backgroundColor: item.color }">
+                </div>
+              </div>
+            </div>
+            
+            <div class="priority-value-col">
+              <span class="count-text">{{ item.count }} 个</span>
+              <span class="percent-text">{{ item.percentage }}%</span>
+            </div>
+          </div>
+          
+          <div class="insight-box" style="margin-top: 1.5rem;">
+            <Award :size="18" />
+            <p>
+              您的日程中 <strong>{{ priorityDistributionText[0]?.label }}</strong> 类任务最多。
+              <span v-if="priorityDistributionText.some(p => p.label === '紧急' || p.label === '非常重要')">
+                注意平衡高优先级任务，避免长期处于高压状态。
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div v-else class="empty-hint">
+          <p>暂无优先级数据，创建日程时设置优先级以获取分析。</p>
+        </div>
       </div>
     </div>
     
     <div v-if="activeTab === 'recommendations'" class="recommendations-content">
-      <div v-for="(rec, index) in recommendations" :key="index" class="recommendation-card">
-        <div class="rec-header">
-          <span class="rec-type">{{ rec.type }}</span>
-          <span class="rec-confidence">置信度：{{ (rec.confidence * 100).toFixed(0) }}%</span>
-        </div>
-        <h4>{{ rec.title }}</h4>
-        <p>{{ rec.message }}</p>
+      <div class="recommendations-header">
+        <Sparkles :size="32" />
+        <h3>AI 深度智能推荐</h3>
+        <p>基于您的日程习惯、优先级分布及时间模式生成的个性化优化方案</p>
       </div>
       
-      <div v-if="recommendations.length === 0" class="empty-state">
-        <p>暂无推荐，继续使用以获取更多智能建议吧！</p>
+      <div v-if="isLoading" class="loading-recommendations">
+        <div class="spinner"></div>
+        <p>AI 正在分析您的日程数据...</p>
+      </div>
+
+      <div v-else class="recommendations-list">
+        <div v-for="(rec, index) in recommendations" :key="index" class="recommendation-card">
+          <div class="rec-header">
+            <span class="rec-type">
+              {{ getRecommendationTypeIcon(rec.type) }} {{ rec.type || 'AI 洞察' }}
+            </span>
+            <span class="rec-confidence" v-if="rec.confidence">
+              <Award :size="14" />
+              匹配度 {{ (rec.confidence * 100).toFixed(0) }}%
+            </span>
+          </div>
+          
+          <h4>{{ rec.title }}</h4>
+          <p class="rec-message">{{ rec.message }}</p>
+          
+          <div v-if="rec.action_suggestions && rec.action_suggestions.length > 0" class="action-suggestions">
+            <h5>💡 行动建议：</h5>
+            <ul>
+              <li v-for="(suggestion, i) in rec.action_suggestions" :key="i">{{ suggestion }}</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div v-if="recommendations.length === 0 && !isLoading" class="empty-state">
+          <BarChart :size="64" />
+          <h4>暂无深度推荐</h4>
+          <p>请尝试创建更多不同优先级的日程，以便 AI 更好地理解您的工作模式。</p>
+          <button class="create-first-btn" @click="router.push('/')">
+            <PlusCircle :size="18" />
+            去创建日程
+          </button>
+        </div>
       </div>
     </div>
+    
   
     <div v-if="activeTab === 'ai-chat'" class="ai-chat-container">
       <div class="chat-header">
@@ -490,17 +769,20 @@ async function handleTabChange(tab) {
   </div>
 </template>
 
+
 <style scoped>
 .statistics-container {
-  max-width: 1200px;
-  margin: 0 auto;
   padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: calc(100vh - 80px);
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
 }
 
 .page-header {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1rem;
   margin-bottom: 2rem;
 }
 
@@ -508,55 +790,76 @@ async function handleTabChange(tab) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: white;
-  color: #5E72E4;
-  border: 2px solid #5E72E4;
+  padding: 0.6rem 1rem;
+  background: white;
+  border: 2px solid #e2e8f0;
   border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.9rem;
+  color: #4a5568;
   font-weight: 500;
-  transition: all 0.3s;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .back-btn:hover {
-  background-color: #5E72E4;
-  color: white;
-  transform: translateX(-5px);
+  background: #f7fafc;
+  border-color: #cbd5e0;
+  transform: translateY(-2px);
 }
 
-h1 {
-  color: #32325D;
+.page-header h1 {
   margin: 0;
+  font-size: 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .tabs {
   display: flex;
   gap: 1rem;
   margin-bottom: 2rem;
-  border-bottom: 2px solid #e9ecef;
+  background: white;
+  padding: 0.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .tab-btn {
-  padding: 0.75rem 1.5rem;
-  background: none;
+  flex: 1;
+  padding: 0.8rem 1.5rem;
   border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 1rem;
-  color: #525F7F;
-  border-bottom: 2px solid transparent;
-  transition: all 0.3s;
+  transition: all 0.3s ease;
+  color: #718096;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
 }
 
-.tab-btn.active {
-  color: #5E72E4;
-  border-bottom-color: #5E72E4;
+.tab-btn:hover {
+  background: #f7fafc;
+  color: #667eea;
 }
 
+.tab-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+/* ===== 总览页面样式 ===== */
 .overview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
@@ -564,92 +867,525 @@ h1 {
 
 .stat-card {
   background: white;
+  border-radius: 16px;
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11);
-  transition: transform 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border-left: 4px solid transparent;
 }
 
 .stat-card:hover {
-  transform: translateY(-5px);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
 }
 
-.stat-header {
+.stat-card.primary {
+  border-left-color: #667eea;
+}
+
+.stat-card.success {
+  border-left-color: #48bb78;
+}
+
+.stat-card.warning {
+  border-left-color: #ed8936;
+}
+
+.stat-card.info {
+  border-left-color: #4299e1;
+}
+
+.stat-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.stat-header h3 {
-  margin: 0;
-  color: #32325D;
-  font-size: 1rem;
+.stat-card.primary .stat-icon {
+  background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+  color: #667eea;
+}
+
+.stat-card.success .stat-icon {
+  background: linear-gradient(135deg, #48bb7820 0%, #38a16920 100%);
+  color: #48bb78;
+}
+
+.stat-card.warning .stat-icon {
+  background: linear-gradient(135deg, #ed893620 0%, #dd6b2020 100%);
+  color: #ed8936;
+}
+
+.stat-card.info .stat-icon {
+  background: linear-gradient(135deg, #4299e120 0%, #3182ce20 100%);
+  color: #4299e1;
+}
+
+.stat-info h3 {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.9rem;
+  color: #718096;
+  font-weight: 500;
 }
 
 .stat-value {
-  font-size: 1.75rem;
-  font-weight: bold;
-  color: #5E72E4;
-  margin: 0.5rem 0;
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #2d3748;
+  line-height: 1;
 }
 
 .stat-desc {
-  color: #8898aa;
-  font-size: 0.875rem;
-  margin: 0;
+  margin: 0.25rem 0 0 0;
+  font-size: 0.8rem;
+  color: #a0aec0;
 }
 
+/* 分析区域 */
+.analysis-section {
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #2d3748;
+  font-weight: 700;
+}
+
+.section-header svg {
+  color: #667eea;
+}
+
+/* 高效时段图表 */
+.chart-container {
+  margin-bottom: 1rem;
+}
+
+.productivity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 200px;
+  padding: 1rem 0;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.chart-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.chart-bar {
+  width: 100%;
+  max-width: 30px;
+  background: linear-gradient(to top, #667eea, #764ba2);
+  border-radius: 4px 4px 0 0;
+  transition: all 0.3s ease;
+  opacity: 0.6;
+  min-height: 4px;
+}
+
+.chart-bar:hover {
+  opacity: 1;
+  transform: scaleY(1.05);
+}
+
+.chart-bar.peak-hour {
+  opacity: 1;
+  background: linear-gradient(to top, #f093fb 0%, #f5576c 100%);
+  box-shadow: 0 0 10px rgba(245, 87, 108, 0.4);
+}
+
+.chart-label {
+  font-size: 0.7rem;
+  color: #718096;
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #4a5568;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.legend-color.peak {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.legend-color.normal {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  opacity: 0.6;
+}
+
+/* 周模式网格 */
+.weekly-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.weekday-card {
+  background: #f7fafc;
+  border-radius: 12px;
+  padding: 1rem;
+  text-align: center;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.weekday-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.weekday-card.busy-day {
+  background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+  border: 2px solid #fc8181;
+}
+
+.weekday-name {
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.weekday-count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #667eea;
+  margin-bottom: 0.5rem;
+}
+
+.weekday-card.busy-day .weekday-count {
+  color: #e53e3e;
+}
+
+.weekday-bar {
+  height: 4px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 2px;
+  margin-top: 0.5rem;
+}
+
+.weekday-card.busy-day .weekday-bar {
+  background: linear-gradient(90deg, #fc8181, #f56565);
+}
+
+/* 优先级分布统计样式 */
+.priority-stats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.priority-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.priority-label-col {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 100px;
+}
+
+.priority-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.priority-name {
+  font-weight: 600;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.priority-bar-area {
+  flex: 1;
+  padding: 0 0.5rem;
+}
+
+.progress-track {
+  height: 10px;
+  background-color: #f1f5f9;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.priority-value-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 80px;
+}
+
+.count-text {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 1rem;
+}
+
+.percent-text {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.empty-hint {
+  text-align: center;
+  padding: 2rem;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+}
+
+/* ===== 推荐页面样式 ===== */
 .recommendations-content {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
+}
+
+.recommendations-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 16px;
+  padding: 2.5rem;
+  text-align: center;
+  box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+}
+
+.recommendations-header svg {
+  color: white;
+  margin-bottom: 0.5rem;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+}
+
+.recommendations-header h3 {
+  margin: 0.5rem 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.recommendations-header p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1rem;
+}
+
+.loading-recommendations {
+  text-align: center;
+  padding: 4rem;
+  color: #667eea;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e2e8f0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.recommendations-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 1.5rem;
 }
 
 .recommendation-card {
   background: white;
+  border-radius: 16px;
   padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11);
-  border-left: 4px solid #5E72E4;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  border: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+}
+
+.recommendation-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+  border-color: #cbd5e1;
 }
 
 .rec-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .rec-type {
-  background: #e3f2fd;
-  color: #1976d2;
-  padding: 0.25rem 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: #f1f5f9;
+  color: #475569;
   border-radius: 20px;
-  font-size: 0.875rem;
-  text-transform: capitalize;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .rec-confidence {
-  color: #8898aa;
-  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #10b981;
+  font-weight: 600;
+  background: #ecfdf5;
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
 }
 
 .recommendation-card h4 {
-  color: #32325D;
-  margin: 0.5rem 0;
+  margin: 0 0 0.75rem 0;
+  color: #1e293b;
+  font-size: 1.15rem;
+  line-height: 1.4;
 }
 
-.recommendation-card p {
-  color: #525F7F;
+.rec-message {
+  margin: 0 0 1rem 0;
+  color: #64748b;
   line-height: 1.6;
+  font-size: 0.95rem;
+  flex-grow: 1;
+}
+
+.action-suggestions {
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 10px;
+  margin-top: auto;
+  border-left: 3px solid #667eea;
+}
+
+.action-suggestions h5 {
+  margin: 0 0 0.5rem 0;
+  color: #334155;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.action-suggestions ul {
   margin: 0;
+  padding-left: 1.2rem;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.action-suggestions li {
+  margin: 0.3rem 0;
+  line-height: 1.5;
 }
 
 .empty-state {
+  grid-column: 1 / -1;
   text-align: center;
-  padding: 3rem;
-  color: #8898aa;
+  padding: 4rem 2rem;
+  background: white;
+  border-radius: 16px;
+  border: 2px dashed #e2e8f0;
+}
+
+.empty-state svg {
+  color: #cbd5e1;
+  margin-bottom: 1rem;
+}
+
+.empty-state h4 {
+  margin: 0.5rem 0;
+  color: #334155;
+  font-size: 1.3rem;
+}
+
+.empty-state p {
+  margin: 0.5rem 0 1.5rem 0;
+  color: #94a3b8;
+}
+
+.create-first-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.create-first-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
 }
 
 .ai-chat-container {

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed,watch  } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
@@ -33,7 +33,19 @@ const formState = ref({
   recurring_interval: 1
 })
 
+// 监听用户信息变化，更新标题
+watch(() => userStore.user, (newUser) => {
+  if (newUser?.username) {
+    document.title = `${newUser.username} - 日历视图`
+  }
+}, { immediate: true })
+
 onMounted(async () => {
+  // 设置页面标题
+  if (userStore.user?.username) {
+    document.title = `${userStore.user.username} - 日历视图`
+  }
+  
   await fetchSchedules()
 })
 
