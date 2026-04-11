@@ -13,6 +13,8 @@ from services.conflict_detector import detect_schedule_conflicts
 from services.countdown_service import CountdownService
 from services.recurring_service import RecurringService  # ← 新增导入
 
+from services.conflict_detector import ConflictDetector
+
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 
 
@@ -271,13 +273,25 @@ def create_schedule_natural(current_user):
         if not parsed_data:
             return jsonify({'error': '解析失败，无法理解您的指令'}), 400
         
-        conflicts = detect_schedule_conflicts(
+        # 使用新的 ConflictDetector 类进行检测
+        conflicts = ConflictDetector.detect_conflicts(
             current_user.id,
             parsed_data['start_time'],
-            parsed_data.get('end_time')
+            parsed_data.get('end_time') or (parsed_data['start_time'] + timedelta(hours=1))
         )
         
         if conflicts:
+
+            # 【新增】当检测到冲突时，自动生成建议方案
+            duration = 60
+            if parsed_data.get('end_time'):
+                duration = int((parsed_data['end_time'] - parsed_data['start_time']).total_seconds() / 60)
+            
+            suggestions = ConflictDetector.suggest_alternative_slots(
+                current_user.id, 
+                parsed_data['start_time'], 
+                duration
+            )
             def utc_to_local(utc_dt):
                 if utc_dt is None:
                     return None
@@ -291,6 +305,11 @@ def create_schedule_natural(current_user):
                     'start_time': utc_to_local(c['start_time']).strftime('%Y-%m-%dT%H:%M:%S'),
                     'end_time': utc_to_local(c['end_time']).strftime('%Y-%m-%dT%H:%M:%S') if c['end_time'] else None
                 } for c in conflicts],
+                'suggestions': [{
+                    'start_time': utc_to_local(datetime.fromisoformat(s['start_time'])).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(datetime.fromisoformat(s['end_time'])).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'reason': s['reason']
+                } for s in suggestions], # 【新增】返回建议列表
                 'parsed_data': {
                     'title': parsed_data['title'],
                     'start_time': utc_to_local(parsed_data['start_time']).strftime('%Y-%m-%dT%H:%M:%S'),

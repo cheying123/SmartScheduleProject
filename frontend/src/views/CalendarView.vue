@@ -16,6 +16,7 @@ const isLoading = ref(false)
 const hoveredDate = ref(null)
 const showFilterMenu = ref(false)
 const filterPriority = ref('all')
+const filterRecurring = ref(false)
 
 // 表单相关状态
 const showFormModal = ref(false)
@@ -126,17 +127,45 @@ function toggleFilterMenu() {
   showFilterMenu.value = !showFilterMenu.value
 }
 
+const filteredSchedules = computed(() => {
+  let result = schedules.value
+  
+  // 按优先级筛选
+  if (filterPriority.value !== 'all') {
+    result = result.filter(s => s.priority === parseInt(filterPriority.value))
+  }
+  
+  // 按重复日程筛选
+  if (filterRecurring.value) {
+    result = result.filter(s => s.is_recurring === true)
+  }
+  
+  return result
+})
+
+
 function setPriorityFilter(priority) {
   filterPriority.value = priority
-  showFilterMenu.value = false
+  // 不关闭菜单，允许继续选择其他筛选条件
 }
 
-const filteredSchedules = computed(() => {
-  if (filterPriority.value === 'all') {
-    return schedules.value
-  }
-  return schedules.value.filter(s => s.priority === parseInt(filterPriority.value))
-})
+function toggleRecurringFilter() {
+  filterRecurring.value = !filterRecurring.value
+  // 不关闭菜单，允许继续选择其他筛选条件
+}
+
+function resetFilters() {
+  filterPriority.value = 'all'
+  filterRecurring.value = false
+}
+
+function getActiveFilterCount() {
+  let count = 0
+  if (filterPriority.value !== 'all') count++
+  if (filterRecurring.value) count++
+  return count
+}
+
 
 function getSchedulesForDate(date) {
   if (!date) return []
@@ -383,44 +412,70 @@ onUnmounted(() => {
           </button>
           
           <div class="dropdown-wrapper">
-            <button @click.stop="toggleFilterMenu" class="action-btn filter-btn" :class="{ 'active': showFilterMenu }" title="筛选日程">
+            <button @click.stop="toggleFilterMenu" class="action-btn filter-btn" :class="{ 'active': showFilterMenu || filterPriority !== 'all' || filterRecurring }" title="筛选日程">
               <Filter :size="18" />
               <span>筛选</span>
-              <span v-if="filterPriority !== 'all'" class="filter-badge">{{ getPriorityLabel(parseInt(filterPriority)).charAt(0) }}</span>
+              <span v-if="filterPriority !== 'all' || filterRecurring" class="filter-badge">
+                {{ getActiveFilterCount() }}
+              </span>
             </button>
             
             <transition name="dropdown-fade">
               <div v-if="showFilterMenu" class="filter-dropdown">
-                <div class="filter-option" @click="setPriorityFilter('all')">
-                  <span class="dot all"></span>
-                  <span>全部日程</span>
-                  <span v-if="filterPriority === 'all'" class="check-mark">✓</span>
+                <div class="filter-section">
+                  <div class="filter-section-title">优先级</div>
+                  <div class="filter-option" @click="setPriorityFilter('all')">
+                    <span class="dot all"></span>
+                    <span>全部日程</span>
+                    <span v-if="filterPriority === 'all'" class="check-mark">✓</span>
+                  </div>
+                  <div class="divider"></div>
+                  <div class="filter-option" @click="setPriorityFilter('1')">
+                    <span class="dot priority-1"></span>
+                    <span>普通</span>
+                    <span v-if="filterPriority === '1'" class="check-mark">✓</span>
+                  </div>
+                  <div class="filter-option" @click="setPriorityFilter('2')">
+                    <span class="dot priority-2"></span>
+                    <span>一般</span>
+                    <span v-if="filterPriority === '2'" class="check-mark">✓</span>
+                  </div>
+                  <div class="filter-option" @click="setPriorityFilter('3')">
+                    <span class="dot priority-3"></span>
+                    <span>重要</span>
+                    <span v-if="filterPriority === '3'" class="check-mark">✓</span>
+                  </div>
+                  <div class="filter-option" @click="setPriorityFilter('4')">
+                    <span class="dot priority-4"></span>
+                    <span>紧急</span>
+                    <span v-if="filterPriority === '4'" class="check-mark">✓</span>
+                  </div>
+                  <div class="filter-option" @click="setPriorityFilter('5')">
+                    <span class="dot priority-5"></span>
+                    <span>非常重要</span>
+                    <span v-if="filterPriority === '5'" class="check-mark">✓</span>
+                  </div>
                 </div>
+                
                 <div class="divider"></div>
-                <div class="filter-option" @click="setPriorityFilter('1')">
-                  <span class="dot priority-1"></span>
-                  <span>普通</span>
-                  <span v-if="filterPriority === '1'" class="check-mark">✓</span>
+                
+                <div class="filter-section">
+                  <div class="filter-section-title">类型</div>
+                  <div class="filter-option checkbox-option" @click="toggleRecurringFilter">
+                    <input 
+                      type="checkbox" 
+                      :checked="filterRecurring" 
+                      @click.stop
+                      class="filter-checkbox"
+                    />
+                    <span class="checkbox-label">仅显示重复日程</span>
+                    <span v-if="filterRecurring" class="check-mark">✓</span>
+                  </div>
                 </div>
-                <div class="filter-option" @click="setPriorityFilter('2')">
-                  <span class="dot priority-2"></span>
-                  <span>一般</span>
-                  <span v-if="filterPriority === '2'" class="check-mark">✓</span>
-                </div>
-                <div class="filter-option" @click="setPriorityFilter('3')">
-                  <span class="dot priority-3"></span>
-                  <span>重要</span>
-                  <span v-if="filterPriority === '3'" class="check-mark">✓</span>
-                </div>
-                <div class="filter-option" @click="setPriorityFilter('4')">
-                  <span class="dot priority-4"></span>
-                  <span>紧急</span>
-                  <span v-if="filterPriority === '4'" class="check-mark">✓</span>
-                </div>
-                <div class="filter-option" @click="setPriorityFilter('5')">
-                  <span class="dot priority-5"></span>
-                  <span>非常重要</span>
-                  <span v-if="filterPriority === '5'" class="check-mark">✓</span>
+                
+                <div class="filter-actions">
+                  <button class="reset-filter-btn" @click="resetFilters">重置筛选</button>
+                  <button class="apply-filter-btn" @click="showFilterMenu = false">应用</button>
                 </div>
               </div>
             </transition>
@@ -864,7 +919,7 @@ onUnmounted(() => {
   border: 1.5px solid #e2e8f0;
   border-radius: 10px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-  min-width: 170px;
+  min-width: 200px;
   z-index: 100;
   overflow: hidden;
   animation: dropdownSlide 0.2s ease-out;
@@ -879,6 +934,19 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+.filter-section {
+  padding: 0.5rem 0;
+}
+
+.filter-section-title {
+  padding: 0.4rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a0aec0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .filter-option {
@@ -896,6 +964,22 @@ onUnmounted(() => {
   background: #f7fafc;
 }
 
+.checkbox-option {
+  gap: 8px;
+}
+
+.filter-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #667eea;
+  flex-shrink: 0;
+}
+
+.checkbox-label {
+  flex: 1;
+}
+
 .check-mark {
   margin-left: auto;
   color: #667eea;
@@ -907,6 +991,49 @@ onUnmounted(() => {
   height: 1px;
   background: #e2e8f0;
   margin: 0.2rem 0;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f7fafc;
+}
+
+.reset-filter-btn {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #cbd5e0;
+  background: white;
+  color: #4a5568;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.reset-filter-btn:hover {
+  background: #edf2f7;
+  border-color: #a0aec0;
+}
+
+.apply-filter-btn {
+  flex: 1;
+  padding: 0.5rem;
+  border: none;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.apply-filter-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .dot {

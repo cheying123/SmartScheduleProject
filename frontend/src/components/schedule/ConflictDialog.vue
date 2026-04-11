@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, Calendar, Clock, CheckCircle, XCircle } from 'lucide-vue-next'
+import { AlertTriangle, Calendar, Clock, CheckCircle, XCircle,Sparkles } from 'lucide-vue-next'
 
 const props = defineProps({
   conflictData: {
@@ -30,6 +30,9 @@ function handleConfirm() {
   emit('confirm')
 }
 
+function handleApplySuggestion(suggestion) {
+  emit('apply-suggestion', suggestion)
+}
 function handleCancel() {
   emit('cancel')
 }
@@ -60,6 +63,21 @@ function handleCancel() {
               <Clock :size="16" />
               <span class="value">至 {{ formatTime(conflictData.parsed_data.end_time) }}</span>
             </div>
+          </div>
+        </div>
+
+        <!-- 【新增】AI 智能建议区域 -->
+        <div v-if="conflictData.suggestions && conflictData.suggestions.length > 0" class="suggestion-section">
+          <h3><Sparkles :size="18" class="sparkle-icon" /> AI 智能调整建议</h3>
+          <p class="suggestion-desc">根据您的历史习惯，我们为您找到了以下空闲时段：</p>
+          
+          <div v-for="(item, index) in conflictData.suggestions" :key="index" class="suggestion-item" @click="handleApplySuggestion(item)">
+            <div class="suggestion-time">
+              <Clock :size="16" />
+              <span>{{ formatTime(item.start_time) }} - {{ formatTime(item.end_time) }}</span>
+            </div>
+            <div class="suggestion-reason">{{ item.reason }}</div>
+            <button class="btn-apply">一键采纳</button>
           </div>
         </div>
 
@@ -114,218 +132,201 @@ function handleCancel() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(4px);
 }
 
 .conflict-dialog {
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  max-width: 600px;
+  border-radius: 12px;
   width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  max-width: 500px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
 }
 
 .dialog-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 24px 24px 16px;
-  border-bottom: 2px solid #fff3e0;
-  background: linear-gradient(135deg, #fff8e1 0%, #fff3e0 100%);
+  gap: 1rem;
+  background: #fff7ed;
 }
 
 .dialog-header h2 {
   margin: 0;
-  font-size: 20px;
-  color: #e65100;
+  font-size: 1.25rem;
+  color: #c2410c;
 }
 
 .dialog-content {
-  padding: 24px;
+  padding: 1.5rem;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .schedule-section {
-  margin-bottom: 20px;
-  padding: 16px;
-  border-radius: 12px;
-}
-
-.new-schedule {
-  background: #e8f5e9;
-  border-left: 4px solid #4caf50;
-}
-
-.conflicting-schedules {
-  background: #ffebee;
-  border-left: 4px solid #f44336;
+  margin-bottom: 1.5rem;
 }
 
 .schedule-section h3 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  color: #333;
+  font-size: 1rem;
+  color: #475569;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .schedule-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
 }
 
 .info-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  color: #334155;
 }
 
-.info-item .label {
-  font-weight: 600;
-  color: #666;
-  min-width: 50px;
-}
-
-.info-item .value {
-  color: #333;
-}
-
-.conflict-item {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding: 12px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.conflict-item:last-child {
+.info-item:last-child {
   margin-bottom: 0;
 }
 
-.conflict-number {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #f44336;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 14px;
-  flex-shrink: 0;
+/* 智能建议样式 */
+.suggestion-section {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
 }
 
-.conflict-details {
-  flex: 1;
+.sparkle-icon {
+  color: #16a34a;
 }
 
-.conflict-title {
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 4px;
+.suggestion-desc {
+  font-size: 0.85rem;
+  color: #15803d;
+  margin-top: -0.5rem;
+  margin-bottom: 0.75rem;
 }
 
-.conflict-time {
+.suggestion-item {
+  background: white;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid #dcfce7;
+  position: relative;
+}
+
+.suggestion-item:hover {
+  border-color: #16a34a;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.suggestion-time {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: #666;
-}
-
-.warning-message {
-  padding: 12px;
-  background: #fff3e0;
-  border-radius: 8px;
-  border-left: 4px solid #ff9800;
-}
-
-.warning-message p {
-  margin: 0;
-  font-size: 14px;
-  color: #e65100;
-  line-height: 1.5;
-}
-
-.dialog-actions {
-  display: flex;
-  gap: 12px;
-  padding: 20px 24px;
-  border-top: 1px solid #e0e0e0;
-  background: #fafafa;
-}
-
-.dialog-actions button {
-  flex: 1;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  font-size: 15px;
   font-weight: 600;
+  color: #166534;
+  margin-bottom: 4px;
+}
+
+.suggestion-reason {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+
+.btn-apply {
+  background: #16a34a;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
   cursor: pointer;
+  float: right;
+  transition: background 0.2s;
+}
+
+.btn-apply:hover {
+  background: #15803d;
+}
+
+.conflict-item {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.conflict-item-title {
+  font-weight: 600;
+  color: #991b1b;
+  margin-bottom: 0.25rem;
+}
+
+.conflict-item-time {
+  font-size: 0.85rem;
+  color: #b91c1c;
+}
+
+.dialog-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 1rem;
+  background: #f8fafc;
+}
+
+.btn-cancel, .btn-confirm {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-cancel {
-  background: #f5f5f5;
-  color: #666;
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #475569;
 }
 
-.btn-cancel:hover:not(:disabled) {
-  background: #e0e0e0;
-  color: #333;
+.btn-cancel:hover {
+  background: #f1f5f9;
 }
 
 .btn-confirm {
-  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  background: #f97316;
+  border: 1px solid #f97316;
   color: white;
-  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
 }
 
-.btn-confirm:hover:not(:disabled) {
-  background: linear-gradient(135deg, #f57c00 0%, #ef6c00 100%);
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
-  transform: translateY(-1px);
+.btn-confirm:hover {
+  background: #ea580c;
 }
 
-.dialog-actions button:disabled {
+.btn-cancel:disabled, .btn-confirm:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-@media (max-width: 640px) {
-  .conflict-dialog {
-    width: 95%;
-    max-height: 90vh;
-  }
-  
-  .dialog-actions {
-    flex-direction: column;
-  }
 }
 </style>

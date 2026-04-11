@@ -231,17 +231,33 @@ const filteredSchedules = computed(() => {
 // 将日程分为未过期和已过期两组
 const upcomingSchedules = computed(() => {
   const now = new Date()
+  // 添加30分钟缓冲时间，避免刚开始的日程立即进入历史记录
+  const bufferTime = 30 * 60 * 1000 // 30分钟的毫秒数
+  
   return filteredSchedules.value.filter(schedule => {
     const scheduleDate = new Date(schedule.start_time)
-    return scheduleDate >= now
+    const scheduleEndDate = schedule.end_time 
+      ? new Date(schedule.end_time) 
+      : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
+    
+    // 如果日程还未结束，或者在缓冲时间内，都算作"即将开始"
+    return scheduleEndDate > new Date(now.getTime() - bufferTime)
   })
 })
 
 const pastSchedules = computed(() => {
   const now = new Date()
+  // 与upcomingSchedules保持一致的缓冲逻辑
+  const bufferTime = 30 * 60 * 1000 // 30分钟的毫秒数
+  
   return filteredSchedules.value.filter(schedule => {
     const scheduleDate = new Date(schedule.start_time)
-    return scheduleDate < now
+    const scheduleEndDate = schedule.end_time 
+      ? new Date(schedule.end_time) 
+      : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
+    
+    // 只有真正结束超过缓冲时间的日程才进入历史记录
+    return scheduleEndDate <= new Date(now.getTime() - bufferTime)
   })
 })
 
@@ -757,6 +773,7 @@ onUnmounted(() => {
         :is-processing="isAIProcessing"
         @confirm="forceCreateSchedule"
         @cancel="() => { conflictDialog = null; naturalLanguageInput = '' }"
+        @apply-suggestion="handleApplySuggestion" 
       />
     </transition>
 
