@@ -3,7 +3,7 @@
 <script setup>
 import { ref, onMounted, computed, onUnmounted,watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart,Sparkles, Search } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart, Sparkles, Search, Filter } from 'lucide-vue-next'
 
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
@@ -242,7 +242,7 @@ const {
   recommendations,
   loadRecommendations,
   clearNotifications
-} = useNotifications(API_URL)
+} = useNotifications(userStore, API_URL)
 
 // 页面状态
 const activeTab = ref(NAVIGATION.tabs.SCHEDULE)
@@ -260,6 +260,59 @@ const notification = ref({
 })
 
 const dailyBriefing = ref(null)
+const notificationFilter = ref('all')
+
+// 通知统计与分组
+const urgentCount = computed(() => {
+  if (!recommendations.value) return 0
+  return recommendations.value.filter(r => r.priority === 'urgent').length
+})
+
+const scheduleReminderCount = computed(() => {
+  if (!recommendations.value) return 0
+  return recommendations.value.filter(r => r.type === 'schedule_reminder').length
+})
+
+const filteredRecommendations = computed(() => {
+  if (!recommendations.value) return []
+  if (notificationFilter.value === 'all') return recommendations.value
+  return recommendations.value.filter(r => r.type === notificationFilter.value)
+})
+
+const groupedNotifications = computed(() => {
+  const groups = {}
+  filteredRecommendations.value.forEach(rec => {
+    if (!groups[rec.type]) {
+      groups[rec.type] = []
+    }
+    groups[rec.type].push(rec)
+  })
+  return groups
+})
+
+// 获取通知图标
+function getNotificationIcon(type) {
+  const icons = {
+    'schedule_reminder': Clock,
+    'weather': Sun,
+    'time_preference': Check,
+    'balance': Sparkles,
+    'info': Globe
+  }
+  return icons[type] || Bell
+}
+
+// 获取通知颜色
+function getNotificationColor(type) {
+  const colors = {
+    'schedule_reminder': '#f97316',
+    'weather': '#0ea5e9',
+    'time_preference': '#10b981',
+    'balance': '#8b5cf6',
+    'info': '#64748b'
+  }
+  return colors[type] || '#667eea'
+}
 
 // 计算属性
 const filteredSchedules = computed(() => {
@@ -631,68 +684,135 @@ onUnmounted(() => {
       <!-- 通知页面（带倒计时提醒） -->
       <div v-if="activeTab === 'notifications'" class="tab-content">
         <div class="notifications-panel">
-          <button class="refresh-btn" @click="loadRecommendations">
-            <Check :size="18" />
-            <span>刷新推荐</span>
-          </button>
-          
-          <div v-if="!recommendations || recommendations.length === 0" class="empty-notifications">
-            <Bell :size="64" />
-            <h3>暂无新消息</h3>
-            <p>点击"刷新推荐"获取智能建议</p>
+          <!-- 头部统计 -->
+          <div class="notifications-header">
+            <div class="header-title">
+              <Bell :size="24" class="bell-icon" />
+              <h3>智能通知中心</h3>
+            </div>
+            
+            <!-- 统计徽章 -->
+            <div v-if="recommendations && recommendations.length > 0" class="stats-badges">
+              <span v-if="urgentCount > 0" class="stat-badge urgent">
+                <AlertCircle :size="14" />
+                {{ urgentCount }} 紧急
+              </span>
+              <span v-if="scheduleReminderCount > 0" class="stat-badge schedule">
+                <Clock :size="14" />
+                {{ scheduleReminderCount }} 日程
+              </span>
+              <span class="stat-badge total">
+                共 {{ recommendations.length }} 条
+              </span>
+            </div>
+          </div>
+
+          <!-- 工具栏 -->
+          <div class="notifications-toolbar">
+            <button class="btn-refresh" @click="loadRecommendations">
+              <Check :size="16" />
+              <span>刷新推荐</span>
+            </button>
+            
+            <div class="filter-group">
+              <Filter :size="16" class="filter-icon" />
+              <select v-model="notificationFilter" class="filter-select">
+                <option value="all">全部类型</option>
+                <option value="schedule_reminder">日程提醒</option>
+                <option value="weather">天气提示</option>
+                <option value="time_preference">时间偏好</option>
+                <option value="balance">平衡建议</option>
+                <option value="info">提示信息</option>
+              </select>
+            </div>
           </div>
           
+          <!-- 空状态 -->
+          <div v-if="!filteredRecommendations || filteredRecommendations.length === 0" class="empty-notifications">
+            <div class="empty-icon">
+              <Bell :size="80" />
+            </div>
+            <h3>{{ notificationFilter === 'all' ? '暂无新消息' : '该类型暂无通知' }}</h3>
+            <p>{{ notificationFilter === 'all' ? '点击"刷新推荐"获取智能建议' : '尝试切换其他类型查看' }}</p>
+            <button v-if="notificationFilter !== 'all'" class="btn-clear-filter" @click="notificationFilter = 'all'">
+              查看全部
+            </button>
+          </div>
+          
+          <!-- 通知列表 -->
           <div v-else class="notifications-list">
-            <!-- 倒计时提醒和普通通知混合显示 -->
+            <!-- 按类型分组显示 -->
             <div 
-              v-for="(rec, index) in recommendations" 
-              :key="index" 
-              class="notification-item"
-              :class="[
-                rec.type === 'schedule_reminder' ? 'type-schedule-reminder' : ('type-' + rec.type),
-                getReminderStyle(rec.priority)
-              ]"
+              v-for="(items, type) in groupedNotifications" 
+              :key="type"
+              class="notification-group"
             >
-              <div class="notification-icon">
+              <!-- 类型标题 -->
+              <div class="group-header">
                 <component 
-                  v-if="rec.type === 'schedule_reminder'"
-                  :is="getReminderIcon(rec.priority)" 
-                  :size="24"
+                  :is="getNotificationIcon(type)" 
+                  :size="18" 
+                  class="group-icon"
+                  :style="{ color: getNotificationColor(type) }"
                 />
-                <Sun v-else-if="rec.type === 'weather'" :size="24" />
-                <Check v-else-if="rec.type === 'time_preference'" :size="24" />
-                <Globe v-else :size="24" />
+                <span class="group-title">{{ getNotificationTitle(type) }}</span>
+                <span class="group-count">{{ items.length }}</span>
               </div>
-              <div class="notification-content">
-                <h4>
-                  {{ rec.type === 'schedule_reminder' ? '⏰ 日程提醒' : getNotificationTitle(rec.type) }}
-                </h4>
-                <p>{{ rec.message }}</p>
-                
-                <!-- 倒计时详情（仅日程提醒显示） -->
-                <div v-if="rec.type === 'schedule_reminder' && rec.countdown" class="countdown-details">
-                  <div class="countdown-time-display">
-                    <Clock :size="14" />
-                    <span class="time-text">{{ rec.countdown.remaining_text }}</span>
-                    <span class="relative-time">{{ formatRelativeTime(rec.start_time) }}</span>
+
+              <!-- 该类型的通知列表 -->
+              <div class="group-items">
+                <div 
+                  v-for="(rec, index) in items" 
+                  :key="rec.id || index"
+                  class="notification-item"
+                  :class="[
+                    rec.type === 'schedule_reminder' ? 'type-schedule-reminder' : ('type-' + rec.type),
+                    getReminderStyle(rec.priority)
+                  ]"
+                >
+                  <div class="notification-icon">
+                    <component 
+                      v-if="rec.type === 'schedule_reminder'"
+                      :is="getReminderIcon(rec.priority)" 
+                      :size="24"
+                    />
+                    <Sun v-else-if="rec.type === 'weather'" :size="24" />
+                    <Check v-else-if="rec.type === 'time_preference'" :size="24" />
+                    <Globe v-else :size="24" />
                   </div>
-                  
-                  <!-- 进度条（可视化剩余时间） -->
-                  <div class="countdown-progress">
-                    <div 
-                      class="progress-bar"
-                      :style="{ width: getProgressWidth(rec.countdown) }"
-                    ></div>
-                  </div>
-                  
-                  <!-- 快速操作按钮 -->
-                  <div class="quick-actions">
-                    <button 
-                      class="view-schedule-btn"
-                      @click="navigateToSchedule(rec.schedule_id)"
-                    >
-                      查看日程
-                    </button>
+                  <div class="notification-content">
+                    <h4>
+                      {{ rec.type === 'schedule_reminder' ? '⏰ 日程提醒' : getNotificationTitle(rec.type) }}
+                    </h4>
+                    <p>{{ rec.message }}</p>
+                    
+                    <!-- 倒计时详情（仅日程提醒显示） -->
+                    <div v-if="rec.type === 'schedule_reminder' && rec.countdown" class="countdown-details">
+                      <div class="countdown-time-display">
+                        <Clock :size="14" />
+                        <span class="time-text">{{ rec.countdown.remaining_text }}</span>
+                        <span class="relative-time">{{ formatRelativeTime(rec.start_time) }}</span>
+                      </div>
+                      
+                      <!-- 进度条（可视化剩余时间） -->
+                      <div class="countdown-progress">
+                        <div 
+                          class="progress-bar"
+                          :style="{ width: getProgressWidth(rec.countdown) }"
+                        ></div>
+                      </div>
+                      
+                      <!-- 快速操作按钮 -->
+                      <div class="quick-actions">
+                        <button 
+                          class="view-schedule-btn"
+                          @click="navigateToSchedule(rec.schedule_id)"
+                        >
+                          <Calendar :size="14" />
+                          <span>查看日程</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1026,48 +1146,202 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 2rem;
   box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
 }
 
-.refresh-btn {
+.notifications-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #32325D;
+}
+
+.bell-icon {
+  color: #5E72E4;
+}
+
+.header-title h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.stats-badges {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.stat-badge.urgent {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.stat-badge.schedule {
+  background-color: #dbeafe;
+  color: #2563eb;
+}
+
+.stat-badge.total {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+.notifications-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.btn-refresh {
   background-color: #5E72E4;
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1.2rem;
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
   transition: all 0.2s;
 }
 
-.refresh-btn:hover {
+.btn-refresh:hover {
   background-color: #4c5fd5;
-  transform: translateY(-2px);
+  transform: translateY(-1px);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: #f8f9fe;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.filter-icon {
+  color: #8898aa;
+}
+
+.filter-select {
+  border: none;
+  background: transparent;
+  font-size: 0.9rem;
+  color: #32325D;
+  outline: none;
+  cursor: pointer;
+  min-width: 120px;
 }
 
 .empty-notifications {
   text-align: center;
   padding: 4rem 2rem;
   color: #adb5bd;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.empty-icon {
+  margin-bottom: 1.5rem;
+  opacity: 0.5;
 }
 
 .empty-notifications h3 {
-  margin: 1rem 0 0.5rem 0;
+  margin: 0 0 0.5rem 0;
   color: #32325D;
+  font-size: 1.2rem;
 }
 
 .empty-notifications p {
   color: #8898aa;
+  margin-bottom: 1.5rem;
+}
+
+.btn-clear-filter {
+  background-color: transparent;
+  border: 1px solid #5E72E4;
+  color: #5E72E4;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-clear-filter:hover {
+  background-color: #5E72E4;
+  color: white;
 }
 
 .notifications-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
+}
+
+.notification-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed #e9ecef;
+}
+
+.group-icon {
+  opacity: 0.8;
+}
+
+.group-title {
+  font-weight: 600;
+  color: #32325D;
+  font-size: 0.95rem;
+}
+
+.group-count {
+  background-color: #e9ecef;
+  color: #525F7F;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  margin-left: auto;
+}
+
+.group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .notification-item {
@@ -1583,5 +1857,131 @@ onUnmounted(() => {
 .replay-btn:hover {
   background-color: #5E72E4;
   color: white;
+}
+
+/* ===== 通知面板响应式样式 ===== */
+@media (max-width: 768px) {
+  .notifications-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .stats-badges {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .notifications-toolbar {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .btn-refresh {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .filter-group {
+    width: 100%;
+  }
+
+  .filter-select {
+    flex: 1;
+  }
+
+  .notification-item {
+    flex-direction: column;
+  }
+
+  .notification-icon {
+    align-self: flex-start;
+  }
+
+  .quick-actions {
+    margin-top: 0.75rem;
+  }
+
+  .view-schedule-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ===== 铃铛动画优化 ===== */
+.bell-icon {
+  animation: ring 2s ease-in-out infinite;
+}
+
+@keyframes ring {
+  0%, 100% { 
+    transform: rotate(0); 
+  }
+  10%, 30% { 
+    transform: rotate(-10deg); 
+  }
+  20%, 40% { 
+    transform: rotate(10deg); 
+  }
+  50% { 
+    transform: rotate(0); 
+  }
+}
+
+/* ===== 优先级徽章脉冲动画 ===== */
+.reminder-urgent .notification-icon {
+  animation: urgent-pulse 2s ease-in-out infinite;
+}
+
+@keyframes urgent-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+  }
+}
+
+/* ===== 分组标题悬停效果 ===== */
+.group-header {
+  transition: all 0.2s;
+}
+
+.group-header:hover {
+  background-color: rgba(94, 114, 228, 0.05);
+  padding-left: 0.5rem;
+  border-radius: 6px;
+}
+
+/* ===== 进度条渐变动画 ===== */
+.progress-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 </style>

@@ -9,10 +9,11 @@ import { NOTIFICATION_TITLES } from '@/constants'
 
 /**
  * 通知管理组合式函数
+ * @param {Object} userStore - 用户状态管理
  * @param {string} API_URL - API 基础地址
  * @returns {Object} 通知管理相关的方法和状态
  */
-export function useNotifications(API_URL) {
+export function useNotifications(userStore, API_URL) {
   const recommendations = ref([])
   const showRecommendations = ref(false)
   const hasUnreadNotifications = ref(false)
@@ -23,7 +24,11 @@ export function useNotifications(API_URL) {
    */
   async function loadRecommendations() {
     try {
-      const response = await axios.get(`${API_URL}/recommendations`)
+      const response = await axios.get(`${API_URL}/recommendations`, {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`
+        }
+      })
       // 修改：后端直接返回数组，不需要 .recommendations
       recommendations.value = Array.isArray(response.data) ? response.data : []
       showRecommendations.value = true

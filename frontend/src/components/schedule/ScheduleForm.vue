@@ -17,6 +17,32 @@ const props = defineProps({
 
 const emit = defineEmits(['submit', 'cancel', 'switch-mode', 'update:schedule'])
 
+// 新增：可用的标签选项
+const AVAILABLE_TAGS = [
+  { value: 'work', label: '工作', icon: '💼' },
+  { value: 'study', label: '学习', icon: '📚' },
+  { value: 'life', label: '生活', icon: '🏠' },
+  { value: 'sport', label: '运动', icon: '🏃' },
+  { value: 'meeting', label: '会议', icon: '🤝' },
+  { value: 'health', label: '健康', icon: '❤️' }
+]
+
+// 新增：切换标签函数
+function toggleTag(tagValue) {
+  const currentTags = Array.isArray(props.schedule.tags) ? [...props.schedule.tags] : []
+  const index = currentTags.indexOf(tagValue)
+  
+  if (index > -1) {
+    // 已存在，移除
+    currentTags.splice(index, 1)
+  } else {
+    // 不存在，添加
+    currentTags.push(tagValue)
+  }
+  
+  emit('update:schedule', { ...props.schedule, tags: currentTags })
+}
+
 const hasEndTime = ref(false)
 const localEndTime = ref('')
 
@@ -234,7 +260,7 @@ initEndTimeFromDB()
           <span>设置结束时间</span>
         </label>
         <!-- 新增提示文字 -->
-        <p v-if="!localEnableEndTime" class="hint-text">
+        <p v-if="!hasEndTime" class="hint-text">
           💡 若不设置，系统将默认日程持续 <strong>1 小时</strong>
         </p>
       </div>
@@ -267,6 +293,24 @@ initEndTimeFromDB()
             {{ level.label }}
           </option>
         </select>
+      </div>
+      
+      <!-- 新增：标签选择 -->
+      <div class="form-group">
+        <label>标签分类</label>
+        <div class="tags-container">
+          <button 
+            type="button"
+            v-for="tag in AVAILABLE_TAGS" 
+            :key="tag.value"
+            class="tag-btn"
+            :class="{ active: (schedule.tags || []).includes(tag.value) }"
+            @click="toggleTag(tag.value)"
+          >
+            <span class="tag-icon">{{ tag.icon }}</span>
+            <span>{{ tag.label }}</span>
+          </button>
+        </div>
       </div>
       
       <div class="form-group">
@@ -484,6 +528,47 @@ initEndTimeFromDB()
 
 .hint-text strong {
   color: #5E72E4;
+}
+
+/* 标签选择器样式 */
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.tag-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 20px;
+  background: white;
+  color: #64748b;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.tag-btn:hover {
+  border-color: #5E72E4;
+  color: #5E72E4;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(94, 114, 228, 0.15);
+}
+
+.tag-btn.active {
+  background: linear-gradient(135deg, #5E72E4 0%, #825EE4 100%);
+  border-color: #5E72E4;
+  color: white;
+  box-shadow: 0 2px 8px rgba(94, 114, 228, 0.3);
+}
+
+.tag-icon {
+  font-size: 1.1rem;
 }
 
 </style>

@@ -3,7 +3,7 @@ import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
-import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart, PlusCircle, MessageSquare, Trash2, Award, Zap, Activity, PieChart, Layers } from 'lucide-vue-next'
+import { Clock, TrendingUp, Calendar, Target, ArrowLeft, MessageCircle, Send, Sparkles, RefreshCw, BarChart, PlusCircle, MessageSquare, Trash2, Award, Zap, Activity, PieChart, Layers, Globe } from 'lucide-vue-next'
 
 
 const API_URL = 'http://127.0.0.1:5000/api'
@@ -327,11 +327,20 @@ const priorityDistributionText = computed(() => {
     5: '#7c3aed'  // Violet
   }
 
+  const priorityIcons = {
+    1: '📝', // 普通
+    2: '🔹', // 一般
+    3: '⭐', // 重要
+    4: '🔥', // 紧急
+    5: '💎'  // 非常重要
+  }
+
   return Object.entries(distribution).map(([priority, count]) => ({
     label: priorityLabels[priority] || `P${priority}`,
     count: Number(count),
     percentage: ((Number(count) / total) * 100).toFixed(1),
-    color: priorityColors[priority] || '#cbd5e1'
+    color: priorityColors[priority] || '#cbd5e1',
+    icon: priorityIcons[priority] || '📌'
   })).sort((a, b) => b.count - a.count)
 })
 
@@ -376,9 +385,77 @@ const productivityChartData = computed(() => {
   return Array.from({ length: 24 }, (_, hour) => ({
     hour,
     count: distribution[hour] || 0,
-    percentage: ((distribution[hour] || 0) / maxCount * 100).toFixed(0)
+    percentage: ((distribution[hour] || 0) / maxCount * 100)
   }))
 })
+
+// 新增：计算标签饼图的角度
+function getStartAngle(index) {
+  if (!statistics.value?.tag_distribution) return 0
+  const tags = statistics.value.tag_distribution
+  let sum = 0
+  for (let i = 0; i < index; i++) {
+    sum += tags[i].percentage
+  }
+  return sum * 3.6 // 转换为角度
+}
+
+function getEndAngle(index) {
+  if (!statistics.value?.tag_distribution) return 0
+  const tag = statistics.value.tag_distribution[index]
+  return getStartAngle(index) + (tag.percentage * 3.6)
+}
+
+// 新增：生成分享链接
+async function generateShareLink() {
+  try {
+    const response = await axios.post(`${API_URL}/analytics/share-link`, {}, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      }
+    })
+    
+    const shareUrl = response.data.url
+    
+    // 复制到剪贴板
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(shareUrl)
+      alert(`✅ 约时链接已复制！\n${shareUrl}\n\n发送给朋友，他们可以看到你未来3天的空闲时间。`)
+    } else {
+      prompt('请手动复制链接：', shareUrl)
+    }
+  } catch (error) {
+    console.error('生成链接失败:', error)
+    alert('❌ 生成链接失败，请稍后重试。')
+  }
+}
+
+// 新增：导出 ICS 文件
+async function exportICS() {
+  try {
+    const response = await axios.get(`${API_URL}/analytics/export/ics`, {
+      headers: {
+        'Authorization': `Bearer ${userStore.token}`
+      },
+      responseType: 'blob' // 重要：指定响应类型为 blob
+    })
+    
+    // 创建下载链接
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    const dateStr = new Date().toISOString().split('T')[0]
+    link.setAttribute('download', `smart_schedule_${dateStr}.ics`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    
+    alert('✅ 日历文件已导出，您可以将其导入手机或电脑日历。')
+  } catch (error) {
+    console.error('导出失败:', error)
+    alert('❌ 导出失败，请稍后重试。')
+  }
+}
 
 // 监听用户信息变化，更新标题
 watch(() => userStore.user, (newUser) => {
@@ -428,6 +505,7 @@ async function handleTabChange(tab) {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight
   }
 }
+
 </script>
 
 <template>
@@ -464,6 +542,22 @@ async function handleTabChange(tab) {
     
     <div v-if="activeTab === 'overview'" class="overview-content">
       <!-- 核心指标卡片 -->
+      <div class="stats-header-actions">
+        <div class="header-title-group">
+          <h2>📊 数据概览</h2>
+        </div>
+        <div class="action-buttons">
+          <button class="btn-share" @click="generateShareLink">
+            <Globe :size="18" />
+            <span>生成约时链接</span>
+          </button>
+          <button class="btn-export" @click="exportICS">
+            <Calendar :size="18" />
+            <span>导出日历 (.ics)</span>
+          </button>
+        </div>
+      </div>
+
       <div class="stats-grid">
         <div class="stat-card primary">
           <div class="stat-icon">
@@ -499,6 +593,45 @@ async function handleTabChange(tab) {
         </div>
       </div>
 
+      <!-- 标签分布分析 -->
+      <div class="analysis-section" v-if="statistics?.tag_distribution && statistics.tag_distribution.length > 0">
+        <div class="section-header">
+          <Layers :size="20" />
+          <h3>时间分配概览</h3>
+        </div>
+        <div class="tag-distribution-container">
+          <div class="tag-pie-chart">
+            <div v-for="(item, index) in statistics.tag_distribution" 
+                 :key="item.tag"
+                 class="pie-segment"
+                 :style="{ 
+                   '--segment-color': item.color,
+                   '--start-angle': getStartAngle(index),
+                   '--end-angle': getEndAngle(index)
+                 }"
+                 :title="`${item.label}: ${item.percentage}%`"
+            ></div>
+            <div class="pie-center">
+              <span>{{ statistics.tag_distribution.reduce((sum, i) => sum + i.count, 0) }}</span>
+              <small>总日程</small>
+            </div>
+          </div>
+          
+          <div class="tag-legend-list">
+            <div v-for="item in statistics.tag_distribution" :key="item.tag" class="tag-legend-item">
+              <div class="tag-info">
+                <span class="tag-icon">{{ item.icon }}</span>
+                <span class="tag-label">{{ item.label }}</span>
+              </div>
+              <div class="tag-stats">
+                <span class="tag-count">{{ item.count }} 个</span>
+                <span class="tag-percentage" :style="{ color: item.color }">{{ item.percentage }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 高效时段分析 -->
       <div class="analysis-section">
         <div class="section-header">
@@ -509,8 +642,9 @@ async function handleTabChange(tab) {
           <div class="productivity-chart">
             <div v-for="item in productivityChartData" :key="item.hour" 
                  class="chart-bar-wrapper">
+              <div class="tooltip" v-if="item.count > 0">{{ item.count }} 个任务</div>
               <div class="chart-bar" 
-                   :style="{ height: item.percentage + '%' }"
+                   :style="{ height: Math.max((item.percentage / 100) * 180, 4) + 'px' }"
                    :class="{ 'peak-hour': statistics?.productivity?.productive_hours?.includes(item.hour) }"
                    :title="`${item.hour}点: ${item.count}个任务`">
               </div>
@@ -563,32 +697,31 @@ async function handleTabChange(tab) {
         </div>
         
         <div v-if="priorityDistributionText.length > 0" class="priority-stats-container">
-          <div v-for="item in priorityDistributionText" :key="item.label" class="priority-stat-row">
-            <div class="priority-label-col">
-              <span class="priority-dot" :style="{ backgroundColor: item.color }"></span>
-              <span class="priority-name">{{ item.label }}</span>
+          <div v-for="item in priorityDistributionText" :key="item.label" class="priority-stat-card">
+            <div class="priority-info">
+              <span class="priority-icon">{{ item.icon }}</span>
+              <div class="priority-text">
+                <span class="priority-name">{{ item.label }}</span>
+                <span class="priority-count">{{ item.count }} 个任务</span>
+              </div>
+              <span class="priority-percent" :style="{ color: item.color }">{{ item.percentage }}%</span>
             </div>
             
-            <div class="priority-bar-area">
+            <div class="priority-bar-wrapper">
               <div class="progress-track">
                 <div class="progress-fill" 
-                     :style="{ width: item.percentage + '%', backgroundColor: item.color }">
+                     :style="{ width: item.percentage + '%', backgroundColor: item.color, boxShadow: `0 0 10px ${item.color}40` }">
                 </div>
               </div>
             </div>
-            
-            <div class="priority-value-col">
-              <span class="count-text">{{ item.count }} 个</span>
-              <span class="percent-text">{{ item.percentage }}%</span>
-            </div>
           </div>
           
-          <div class="insight-box" style="margin-top: 1.5rem;">
+          <div class="insight-box modern-insight">
             <Award :size="18" />
             <p>
               您的日程中 <strong>{{ priorityDistributionText[0]?.label }}</strong> 类任务最多。
               <span v-if="priorityDistributionText.some(p => p.label === '紧急' || p.label === '非常重要')">
-                注意平衡高优先级任务，避免长期处于高压状态。
+                建议适当减少高优任务，保持工作与生活的平衡。
               </span>
             </p>
           </div>
@@ -776,32 +909,33 @@ async function handleTabChange(tab) {
 }
 
 .back-btn {
+  background: white;
+  border: none;
+  border-radius: 20px;
+  padding: 0.5rem 1rem;
+  height: 40px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
-  padding: 0.6rem 1rem;
-  background: white;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
-  color: #4a5568;
-  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+  color: #5E72E4;
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 .back-btn:hover {
-  background: #f7fafc;
-  border-color: #cbd5e0;
-  transform: translateY(-2px);
+  transform: translateX(-3px);
+  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.2);
+  background: #f8f9fe;
 }
 
-.page-header h1 {
+.page-title {
   margin: 0;
-  font-size: 2rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #32325D;
+  font-size: 1.8rem;
 }
 
 .tabs {
@@ -811,80 +945,100 @@ async function handleTabChange(tab) {
   background: white;
   padding: 0.5rem;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .tab-btn {
   flex: 1;
-  padding: 0.8rem 1.5rem;
+  padding: 0.75rem 1.5rem;
   border: none;
   background: transparent;
   border-radius: 8px;
   font-weight: 600;
+  color: #8898aa;
   cursor: pointer;
-  transition: all 0.3s ease;
-  color: #718096;
+  transition: all 0.3s;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
 }
 
-.tab-btn:hover {
-  background: #f7fafc;
-  color: #667eea;
-}
-
 .tab-btn.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #5E72E4;
   color: white;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.3);
 }
 
-/* ===== 总览页面样式 ===== */
-.overview-content {
+.tab-btn:hover:not(.active) {
+  background: #f8f9fe;
+  color: #5E72E4;
+}
+
+/* ===== 导出按钮样式 ===== */
+.stats-header-actions {
   display: flex;
-  flex-direction: column;
-  gap: 2rem;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #f8f9fe;
+  border-radius: 12px;
 }
 
+.action-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn-share, .btn-export {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.btn-share {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+}
+
+.btn-export {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.btn-share:hover, .btn-export:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* 核心指标卡片 */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
+  margin-bottom: 2rem;
 }
 
 .stat-card {
   background: white;
-  border-radius: 16px;
   padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: center;
   gap: 1rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s ease;
-  border-left: 4px solid transparent;
+  transition: transform 0.3s;
 }
 
 .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-}
-
-.stat-card.primary {
-  border-left-color: #667eea;
-}
-
-.stat-card.success {
-  border-left-color: #48bb78;
-}
-
-.stat-card.warning {
-  border-left-color: #ed8936;
-}
-
-.stat-card.info {
-  border-left-color: #4299e1;
+  transform: translateY(-5px);
 }
 
 .stat-icon {
@@ -894,56 +1048,42 @@ async function handleTabChange(tab) {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  color: white;
 }
 
-.stat-card.primary .stat-icon {
-  background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
-  color: #667eea;
-}
-
-.stat-card.success .stat-icon {
-  background: linear-gradient(135deg, #48bb7820 0%, #38a16920 100%);
-  color: #48bb78;
-}
-
-.stat-card.warning .stat-icon {
-  background: linear-gradient(135deg, #ed893620 0%, #dd6b2020 100%);
-  color: #ed8936;
-}
-
-.stat-card.info .stat-icon {
-  background: linear-gradient(135deg, #4299e120 0%, #3182ce20 100%);
-  color: #4299e1;
-}
+.stat-card.primary .stat-icon { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.stat-card.warning .stat-icon { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+.stat-card.success .stat-icon { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+.stat-card.info .stat-icon { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
 
 .stat-info h3 {
-  margin: 0 0 0.25rem 0;
+  margin: 0 0 0.5rem 0;
+  color: #8898aa;
   font-size: 0.9rem;
-  color: #718096;
-  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .stat-value {
   margin: 0;
   font-size: 1.8rem;
   font-weight: 700;
-  color: #2d3748;
-  line-height: 1;
+  color: #32325D;
 }
 
 .stat-desc {
   margin: 0.25rem 0 0 0;
-  font-size: 0.8rem;
-  color: #a0aec0;
+  color: #8898aa;
+  font-size: 0.85rem;
 }
 
-/* 分析区域 */
+/* 分析区块 */
 .analysis-section {
   background: white;
-  border-radius: 16px;
+  border-radius: 12px;
   padding: 2rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .section-header {
@@ -951,70 +1091,101 @@ async function handleTabChange(tab) {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 2px solid #e2e8f0;
+  color: #32325D;
+  font-size: 1.2rem;
+  font-weight: 600;
 }
 
-.section-header h3 {
-  margin: 0;
-  font-size: 1.3rem;
-  color: #2d3748;
-  font-weight: 700;
-}
-
-.section-header svg {
-  color: #667eea;
-}
-
-/* 高效时段图表 */
 .chart-container {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .productivity-chart {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  justify-content: space-around;
   height: 200px;
   padding: 1rem 0;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid #e9ecef;
 }
 
 .chart-bar-wrapper {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  height: 100%;
-  justify-content: flex-end;
+  gap: 0.5rem;
+  flex: 1;
+  position: relative;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #32325D;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s;
+  margin-bottom: 5px;
+  z-index: 10;
+}
+
+.tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 4px;
+  border-style: solid;
+  border-color: #32325D transparent transparent transparent;
+}
+
+.chart-bar-wrapper:hover .tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-5px);
 }
 
 .chart-bar {
-  width: 100%;
-  max-width: 30px;
-  background: linear-gradient(to top, #667eea, #764ba2);
-  border-radius: 4px 4px 0 0;
-  transition: all 0.3s ease;
-  opacity: 0.6;
+  width: 16px;
+  background: #e9ecef;
+  border-radius: 8px;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   min-height: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.2), transparent);
+  border-radius: 8px;
 }
 
 .chart-bar:hover {
-  opacity: 1;
   transform: scaleY(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .chart-bar.peak-hour {
-  opacity: 1;
-  background: linear-gradient(to top, #f093fb 0%, #f5576c 100%);
-  box-shadow: 0 0 10px rgba(245, 87, 108, 0.4);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .chart-label {
-  font-size: 0.7rem;
-  color: #718096;
-  margin-top: 0.5rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  color: #8898aa;
 }
 
 .chart-legend {
@@ -1029,22 +1200,111 @@ async function handleTabChange(tab) {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
-  color: #4a5568;
+  color: #525F7F;
 }
 
 .legend-color {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.legend-color.peak { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.legend-color.normal { background: #e9ecef; }
+
+.insight-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f8f9fe;
+  border-radius: 8px;
+  border-left: 4px solid #5E72E4;
+}
+
+.insight-box p {
+  margin: 0;
+  color: #32325D;
+  line-height: 1.6;
+}
+
+/* ===== 优先级分布优化样式 ===== */
+.priority-stats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.priority-stat-card {
+  background: white;
+  padding: 1.25rem;
+  border-radius: 12px;
+  border: 1px solid #f1f5f9;
+  transition: all 0.3s ease;
+}
+
+.priority-stat-card:hover {
+  border-color: #e2e8f0;
+  box-shadow: 0 8px 24px rgba(149, 157, 165, 0.1);
+  transform: translateY(-2px);
+}
+
+.priority-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.priority-icon {
+  font-size: 1.5rem;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.priority-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.priority-name {
+  font-weight: 600;
+  color: #32325D;
+  font-size: 1rem;
+}
+
+.priority-count {
+  font-size: 0.85rem;
+  color: #8898aa;
+}
+
+.priority-percent {
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+.progress-track {
+  height: 8px;
+  background: #f1f5f9;
   border-radius: 4px;
+  overflow: hidden;
 }
 
-.legend-color.peak {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.legend-color.normal {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  opacity: 0.6;
+.modern-insight {
+  background: linear-gradient(135deg, #f8f9fe 0%, #eef2ff 100%);
+  border-left: 4px solid #667eea;
 }
 
 /* 周模式网格 */
@@ -1052,537 +1312,88 @@ async function handleTabChange(tab) {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .weekday-card {
-  background: #f7fafc;
-  border-radius: 12px;
+  background: #f8f9fe;
   padding: 1rem;
+  border-radius: 8px;
   text-align: center;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.weekday-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
 }
 
 .weekday-card.busy-day {
-  background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
-  border: 2px solid #fc8181;
+  background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+  transform: scale(1.05);
 }
 
 .weekday-name {
-  font-weight: 700;
-  color: #2d3748;
+  font-weight: 600;
+  color: #32325D;
   margin-bottom: 0.5rem;
-  font-size: 0.95rem;
 }
 
 .weekday-count {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #667eea;
+  color: #5E72E4;
   margin-bottom: 0.5rem;
-}
-
-.weekday-card.busy-day .weekday-count {
-  color: #e53e3e;
 }
 
 .weekday-bar {
   height: 4px;
-  background: linear-gradient(90deg, #667eea, #764ba2);
+  background: #5E72E4;
   border-radius: 2px;
-  margin-top: 0.5rem;
+  margin: 0 auto;
 }
 
-.weekday-card.busy-day .weekday-bar {
-  background: linear-gradient(90deg, #fc8181, #f56565);
-}
-
-/* 优先级分布统计样式 */
-.priority-stats-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.priority-stat-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.priority-label-col {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 100px;
-}
-
-.priority-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.priority-name {
-  font-weight: 600;
-  color: #475569;
-  font-size: 0.95rem;
-}
-
-.priority-bar-area {
-  flex: 1;
-  padding: 0 0.5rem;
-}
-
-.progress-track {
-  height: 10px;
-  background-color: #f1f5f9;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: 5px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.priority-value-col {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  min-width: 80px;
-}
-
-.count-text {
-  font-weight: 700;
-  color: #1e293b;
-  font-size: 1rem;
-}
-
-.percent-text {
-  font-size: 0.8rem;
-  color: #94a3b8;
-}
-
-.empty-hint {
-  text-align: center;
-  padding: 2rem;
-  color: #94a3b8;
-  background: #f8fafc;
-  border-radius: 8px;
-  border: 1px dashed #cbd5e1;
-}
-
-/* ===== 推荐页面样式 ===== */
-.recommendations-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.recommendations-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 16px;
-  padding: 2.5rem;
-  text-align: center;
-  box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
-}
-
-.recommendations-header svg {
-  color: white;
-  margin-bottom: 0.5rem;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
-}
-
-.recommendations-header h3 {
-  margin: 0.5rem 0;
-  font-size: 1.8rem;
-  font-weight: 700;
-}
-
-.recommendations-header p {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 1rem;
-}
-
-.loading-recommendations {
-  text-align: center;
-  padding: 4rem;
-  color: #667eea;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #e2e8f0;
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 1rem;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.recommendations-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 1.5rem;
-}
-
-.recommendation-card {
-  background: white;
-  border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
-  border: 1px solid #f1f5f9;
-  display: flex;
-  flex-direction: column;
-}
-
-.recommendation-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
-  border-color: #cbd5e1;
-}
-
-.rec-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.rec-type {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.8rem;
-  background: #f1f5f9;
-  color: #475569;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.rec-confidence {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  color: #10b981;
-  font-weight: 600;
-  background: #ecfdf5;
-  padding: 0.25rem 0.6rem;
-  border-radius: 12px;
-}
-
-.recommendation-card h4 {
-  margin: 0 0 0.75rem 0;
-  color: #1e293b;
-  font-size: 1.15rem;
-  line-height: 1.4;
-}
-
-.rec-message {
-  margin: 0 0 1rem 0;
-  color: #64748b;
-  line-height: 1.6;
-  font-size: 0.95rem;
-  flex-grow: 1;
-}
-
-.action-suggestions {
-  padding: 1rem;
-  background: #f8fafc;
-  border-radius: 10px;
-  margin-top: auto;
-  border-left: 3px solid #667eea;
-}
-
-.action-suggestions h5 {
-  margin: 0 0 0.5rem 0;
-  color: #334155;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.action-suggestions ul {
-  margin: 0;
-  padding-left: 1.2rem;
-  color: #475569;
-  font-size: 0.9rem;
-}
-
-.action-suggestions li {
-  margin: 0.3rem 0;
-  line-height: 1.5;
-}
-
-.empty-state {
-  grid-column: 1 / -1;
-  text-align: center;
-  padding: 4rem 2rem;
-  background: white;
-  border-radius: 16px;
-  border: 2px dashed #e2e8f0;
-}
-
-.empty-state svg {
-  color: #cbd5e1;
-  margin-bottom: 1rem;
-}
-
-.empty-state h4 {
-  margin: 0.5rem 0;
-  color: #334155;
-  font-size: 1.3rem;
-}
-
-.empty-state p {
-  margin: 0.5rem 0 1.5rem 0;
-  color: #94a3b8;
-}
-
-.create-first-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.create-first-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-}
-
+/* AI 聊天区域 */
 .ai-chat-container {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11);
-  height: 650px;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 600px;
 }
 
 .chat-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   padding: 1.5rem 2rem;
   border-bottom: 2px solid #e9ecef;
-  background: linear-gradient(135deg, #f8f9fe 0%, #ffffff 100%);
-  border-radius: 12px 12px 0 0;
-}
-
-.chat-title {
+  background: linear-gradient(135deg, #f8f9fe 0%, #eef2f9 100%);
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
 }
 
-.chat-title h3 {
+.chat-header h3 {
   margin: 0;
   color: #32325D;
-  font-size: 1.1rem;
-}
-
-.chat-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.action-btn {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: white;
-  border: 2px solid #dee2e6;
-  border-radius: 6px;
-  color: #525F7F;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: all 0.3s;
 }
 
-.action-btn:hover {
-  background-color: #f8f9fe;
-  border-color: #5E72E4;
-  color: #5E72E4;
-}
-
-.chat-body-wrapper {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-}
-
-.conversation-sidebar {
-  width: 300px;
-  background: #fafbfc;
-  border-right: 2px solid #e9ecef;
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.3s ease;
-}
-
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 2px solid #e9ecef;
-}
-
-.sidebar-header h4 {
-  margin: 0;
-  color: #32325D;
-  font-size: 1rem;
-}
-
-.close-sidebar-btn {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  color: #8898aa;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.close-sidebar-btn:hover {
-  color: #f5365c;
-}
-
-.conversation-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem;
-}
-
-.conversation-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  margin-bottom: 0.5rem;
+.manage-btn {
   background: white;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: 2px solid transparent;
-}
-
-.conversation-item:hover {
-  background: #f8f9fe;
-  border-color: #dee2e6;
-}
-
-.conversation-item.active {
-  background: #e3f2fd;
-  border-color: #5E72E4;
-}
-
-.conversation-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.conversation-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #32325D;
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-
-.conversation-time {
-  color: #8898aa;
-  font-size: 0.75rem;
-}
-
-.delete-conversation-btn {
-  background: none;
-  border: none;
-  color: #8898aa;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.delete-conversation-btn:hover {
-  background: #fee;
-  color: #f5365c;
-}
-
-.empty-conversations {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 3rem 1rem;
-  color: #8898aa;
-  text-align: center;
-}
-
-.empty-conversations p {
-  margin: 0;
-  font-size: 0.9rem;
-}
-
-.chat-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.clear-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: white;
-  border: 2px solid #dee2e6;
-  border-radius: 6px;
-  color: #525F7F;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.clear-btn:hover {
-  background-color: #f8f9fe;
-  border-color: #5E72E4;
+  border: 2px solid #e9ecef;
   color: #5E72E4;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.manage-btn:hover {
+  background: #5E72E4;
+  color: white;
+  border-color: #5E72E4;
 }
 
 .chat-messages {
@@ -1592,53 +1403,59 @@ async function handleTabChange(tab) {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  background-color: #fafbfc;
 }
 
 .message {
   display: flex;
   gap: 1rem;
-  animation: fadeIn 0.3s ease;
+  max-width: 85%;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .message.user {
+  align-self: flex-end;
   flex-direction: row-reverse;
 }
 
 .message-avatar {
-  flex-shrink: 0;
-}
-
-.user-avatar {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: bold;
-  font-size: 1rem;
+  flex-shrink: 0;
+  font-size: 1.2rem;
 }
 
-.message-content {
-  max-width: 70%;
-  background: white;
-  padding: 1rem 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.message.user .message-content {
+.message.assistant .message-avatar {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
 }
 
-.message-content p {
-  margin: 0;
+.message.user .message-avatar {
+  background: #e9ecef;
+  color: #5E72E4;
+}
+
+.message-bubble {
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.assistant .message-bubble {
+  background: #f8f9fe;
+  color: #32325D;
+  border-top-left-radius: 4px;
+}
+
+.message.user .message-bubble {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-top-right-radius: 4px;
 }
 
 .message-time {
@@ -1754,5 +1571,136 @@ async function handleTabChange(tab) {
 .empty-chat p {
   margin: 0;
   font-size: 1.1rem;
+}
+
+/* ===== 标签分布样式 ===== */
+.tag-distribution-container {
+  display: flex;
+  gap: 3rem;
+  align-items: center;
+  padding: 2rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.tag-pie-chart {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    var(--segment-color) var(--start-angle) var(--end-angle)
+  );
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+}
+
+.tag-pie-chart:hover {
+  transform: scale(1.05);
+}
+
+.pie-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 120px;
+  height: 120px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.pie-center span {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #32325D;
+}
+
+.pie-center small {
+  font-size: 0.85rem;
+  color: #8898aa;
+}
+
+.tag-legend-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tag-legend-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f8f9fe;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.tag-legend-item:hover {
+  background: #eef2ff;
+  transform: translateX(4px);
+}
+
+.tag-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tag-icon {
+  font-size: 1.5rem;
+}
+
+.tag-label {
+  font-weight: 600;
+  color: #32325D;
+}
+
+.tag-stats {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tag-count {
+  font-size: 0.9rem;
+  color: #525F7F;
+}
+
+.tag-percentage {
+  font-weight: 700;
+  font-size: 1.1rem;
+  min-width: 60px;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .tag-distribution-container {
+    flex-direction: column;
+    gap: 2rem;
+  }
+  
+  .tag-pie-chart {
+    width: 180px;
+    height: 180px;
+  }
+  
+  .pie-center {
+    width: 100px;
+    height: 100px;
+  }
+  
+  .pie-center span {
+    font-size: 1.5rem;
+  }
 }
 </style>

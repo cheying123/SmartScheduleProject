@@ -28,7 +28,8 @@ export function useSchedule(userStore, API_URL) {
     end_time: '',
     priority: 1,
     is_recurring: false,
-    recurring_pattern: ''
+    recurring_pattern: '',
+    tags: [] // 新增：标签数组
   })
   
   // 表单引用
@@ -40,7 +41,8 @@ export function useSchedule(userStore, API_URL) {
     end_time: '',
     priority: 1,
     is_recurring: false,
-    recurring_pattern: ''
+    recurring_pattern: '',
+    tags: [] // 新增：标签数组
   })
 
   /**
@@ -91,11 +93,13 @@ export function useSchedule(userStore, API_URL) {
       const payload = {
         ...newSchedule.value,
         start_time: new Date(newSchedule.value.start_time).toISOString(),
+        end_time: newSchedule.value.end_time ? new Date(newSchedule.value.end_time).toISOString() : null,
         priority: parseInt(newSchedule.value.priority),
         is_recurring: newSchedule.value.is_recurring || false,
         recurring_pattern: newSchedule.value.is_recurring 
           ? (newSchedule.value.recurring_pattern || 'weekly') 
-          : null
+          : null,
+        tags: Array.isArray(newSchedule.value.tags) ? newSchedule.value.tags : []
       }
       
       console.log('创建日程 payload:', payload)
@@ -182,7 +186,8 @@ export function useSchedule(userStore, API_URL) {
       end_time: localEndTime,
       priority: schedule.priority || 1,
       is_recurring: schedule.is_recurring || false,
-      recurring_pattern: schedule.recurring_pattern || ''
+      recurring_pattern: schedule.recurring_pattern || '',
+      tags: Array.isArray(schedule.tags) ? schedule.tags : [] // 确保 tags 是数组
     }
   }
 
@@ -217,13 +222,15 @@ export function useSchedule(userStore, API_URL) {
       const payload = {
         ...editForm.value,
         start_time: new Date(editForm.value.start_time).toISOString(),
+        end_time: editForm.value.end_time ? new Date(editForm.value.end_time).toISOString() : null,
         priority: parseInt(editForm.value.priority),
         is_recurring: !!editForm.value.is_recurring,
         recurring_pattern: editForm.value.is_recurring 
           ? (editForm.value.recurring_pattern || 'weekly') 
-          : null
+          : null,
+        tags: Array.isArray(editForm.value.tags) ? editForm.value.tags : []
       }
-      
+
       console.log('更新日程 payload:', payload)
       await axios.put(`${API_URL}/schedules/${editingSchedule.value.id}`, payload)
       
