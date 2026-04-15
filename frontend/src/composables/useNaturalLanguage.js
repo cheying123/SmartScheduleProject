@@ -27,6 +27,43 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
   const recordingTimer = ref(null)
 
   /**
+   * 解析自然语言并预填表单（不创建）
+   * @param {number} timezoneOffset - 时区偏移量（分钟）
+   * @returns {Promise<Object>} 解析结果
+   */
+  async function parseNaturalLanguage(timezoneOffset) {
+    if (!naturalLanguageInput.value.trim()) {
+      alert('请输入指令内容')
+      return null
+    }
+    
+    isAIProcessing.value = true
+    
+    try {
+      const response = await axios.post(`${API_URL}/schedules/nlp-parse`, {
+        text: naturalLanguageInput.value,
+        timezone_offset: timezoneOffset
+      })
+      
+      // 返回解析后的数据，供父组件填充表单
+      return {
+        success: true,
+        data: response.data
+      }
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || error.message || '解析失败，请重试'
+      alert(`❌ 错误：${errorMsg}`)
+      console.error(error)
+      return { 
+        success: false, 
+        error: errorMsg 
+      }
+    } finally {
+      isAIProcessing.value = false
+    }
+  }
+
+  /**
    * 处理自然语言提交
    * @param {number} timezoneOffset - 时区偏移量（分钟）
    * @returns {Promise<Object>} 处理结果
@@ -258,55 +295,6 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     }
   }
 
-  async function parseAndCreate(inputText) {
-    if (!inputText || !inputText.trim()) {
-      error.value = '请输入内容'
-      return null
-    }
-
-    isLoading.value = true
-    error.value = null
-    
-    try {
-      const response = await axios.post(
-        `${API_URL}/schedules/nlp-parse`,
-        { text: inputText },
-        { 
-          headers: { 
-            'Authorization': `Bearer ${userStore.token}`,
-            'Content-Type': 'application/json'
-          } 
-        }
-      )
-      
-      const scheduleData = response.data
-      
-      // ✅ 增强反馈：音效 + 语音 + 视觉（通过返回值通知父组件高亮）
-      playSound('success')
-      const timeStr = new Date(scheduleData.start_time).toLocaleString('zh-CN', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-      speak(`好的，已为您安排${scheduleData.title}，时间是${timeStr}`)
-      
-      return scheduleData
-    } catch (err) {
-      console.error('NLP 解析失败:', err)
-      const errMsg = err.response?.data?.error || '智能解析失败，请尝试手动输入'
-      error.value = errMsg
-      
-      // ✅ 错误反馈：音效 + 语音
-      playSound('error')
-      speak('抱歉，我没听懂，请您再说清楚一点', true)
-      
-      throw err
-    } finally {
-      isLoading.value = false
-    }
-  }
-
   onUnmounted(() => {
     if (recordingTimer.value) {
       clearInterval(recordingTimer.value)
@@ -322,6 +310,7 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     conflictDialog,
     isRecording,
     recordingDuration,
+    parseNaturalLanguage,
     handleNaturalLanguageSubmit,
     startVoiceInput,
     stopRecording,

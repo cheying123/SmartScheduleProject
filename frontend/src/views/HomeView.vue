@@ -57,8 +57,15 @@ async function addSchedule() {
   console.log('📝 开始创建日程...')
   
   try {
-    const success = await originalAddSchedule()
-    console.log('✅ 创建结果:', success)
+    const result = await originalAddSchedule()
+    console.log('✅ 创建结果:', result)
+    
+    // 【新增】检查是否有冲突
+    if (result.conflict) {
+      console.log('⚠️ 显示冲突对话框')
+      conflictDialog.value = result.conflict
+      return
+    }
     
     // 先立即关闭模态框
     isFormVisible.value = false
@@ -69,7 +76,7 @@ async function addSchedule() {
     }, 100)
     
     // 显示通知
-    if (success) {
+    if (result.success) {
       showNotification('success', '✅ 日程创建成功！')
     } else {
       showNotification('error', '❌ 创建失败，请重试')
@@ -110,6 +117,7 @@ const {
   conflictDialog,
   isRecording,
   recordingDuration,
+  parseNaturalLanguage, // 新增：只解析不创建
   handleNaturalLanguageSubmit,
   startVoiceInput,
   stopRecording,
@@ -125,6 +133,59 @@ function handleSpeak(text) {
     window.speechSynthesis.speak(utterance)
   } else {
     alert('您的浏览器不支持语音播报')
+  }
+}
+
+/**
+ * 处理"预填表单"按钮点击
+ * 解析自然语言后切换到表单模式并填充数据
+ */
+async function handleParseAndFill() {
+  console.log('📝 开始解析自然语言并预填表单...')
+  
+  // 获取时区偏移量
+  const timezoneInfo = getTimezoneInfo()
+  const timezoneOffset = timezoneInfo.offset
+  
+  // 调用解析接口
+  const result = await parseNaturalLanguage(timezoneOffset)
+  
+  if (result && result.success) {
+    console.log('✅ 解析成功，准备填充表单:', result.data)
+    
+    // 将解析结果填充到 newSchedule 对象中
+    const parsedData = result.data
+    
+    // 构建表单数据
+    newSchedule.value = {
+      title: parsedData.title || '',
+      content: parsedData.content || '',
+      start_time: parsedData.start_time || '',
+      end_time: parsedData.end_time || '',
+      priority: parsedData.priority || 1,
+      is_recurring: parsedData.is_recurring || false,
+      recurring_pattern: parsedData.recurring_pattern || null,
+      tags: parsedData.tags || []
+    }
+    
+    console.log('📋 表单数据已填充:', newSchedule.value)
+    
+    // 关闭自然语言输入框
+    isNaturalLanguageMode.value = false
+    naturalLanguageInput.value = ''
+    
+    // 打开传统表单模式
+    createMode.value = CREATE_MODES.FORM
+    isFormVisible.value = true
+    
+    // 显示成功提示
+    showNotification('success', `✨ AI 解析成功！请审查表单内容`)
+    
+    // 可选：语音播报
+    handleSpeak(`已为您解析出${parsedData.title}，请确认信息是否正确`)
+  } else {
+    console.error('❌ 解析失败')
+    showNotification('error', '❌ 解析失败，请重试或手动输入')
   }
 }
 
@@ -712,6 +773,7 @@ onUnmounted(() => {
           :recording-duration="recordingDuration"
           :is-ai-processing="isAIProcessing"
           @submit="handleNaturalLanguageSubmit"
+          @parse-and-fill="handleParseAndFill"
           @cancel="handleCancelClick"
           @switch-mode="openCreateForm"
           @voice-input="startVoiceInput"

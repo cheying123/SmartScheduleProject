@@ -476,17 +476,6 @@ async function handleTabChange(tab) {
           </div>
         </div>
         
-        <div class="stat-card success">
-          <div class="stat-icon">
-            <TrendingUp :size="28" />
-          </div>
-          <div class="stat-info">
-            <h3>完成率</h3>
-            <p class="stat-value">{{ (statistics?.productivity?.completion_rate * 100 || 0).toFixed(1) }}%</p>
-            <p class="stat-desc">任务完成比例</p>
-          </div>
-        </div>
-        
         <div class="stat-card warning">
           <div class="stat-icon">
             <Clock :size="28" />

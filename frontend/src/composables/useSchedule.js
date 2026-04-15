@@ -77,13 +77,13 @@ export function useSchedule(userStore, API_URL) {
 
   /**
    * 添加新日程
-   * @returns {Promise<boolean>} 是否成功
+   * @returns {Promise<Object>} 返回结果对象 { success: boolean, conflict?: Object }
    */
   async function addSchedule() {
     // 验证必填字段
     if (!newSchedule.value.title || !newSchedule.value.start_time) {
       alert('标题和开始时间不能为空！')
-      return false
+      return { success: false }
     }
     
     try {
@@ -106,11 +106,24 @@ export function useSchedule(userStore, API_URL) {
       
       // 重新加载列表
       await fetchSchedules()
-      return true
+      return { success: true }
     } catch (err) {
+      // 【新增】处理409冲突响应
+      if (err.response?.status === 409) {
+        const conflictData = err.response.data
+        console.log('⚠️ 检测到日程冲突:', conflictData)
+        
+        // 返回冲突数据，由调用方处理
+        return { 
+          success: false, 
+          conflict: conflictData 
+        }
+      }
+      
+      // 其他错误
       alert('添加失败，请检查控制台信息。')
       console.error(err)
-      return false
+      return { success: false }
     }
   }
 

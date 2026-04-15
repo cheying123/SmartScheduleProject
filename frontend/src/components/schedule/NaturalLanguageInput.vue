@@ -30,6 +30,7 @@ const emit = defineEmits([
   'cancel',
   'switch-mode',
   'voice-input',
+  'parse-and-fill',  // 新增：解析并预填表单
   'update:inputValue'
 ])
 </script>
@@ -69,7 +70,16 @@ const emit = defineEmits([
         <span>AI 正在智能解析中...</span>
       </div>
       
+      <!-- 录音状态指示器 -->
+      <div v-if="isRecording" class="recording-status-bar">
+        <span class="recording-dot"></span>
+        <span class="recording-label">正在录音</span>
+        <span class="recording-time">{{ formatRecordingTime(recordingDuration) }}</span>
+      </div>
+      
+      <!-- 操作按钮区域 -->
       <div class="nl-actions">
+        <!-- 第一行：语音输入（独立大按钮） -->
         <button 
           type="button" 
           class="voice-btn" 
@@ -78,7 +88,7 @@ const emit = defineEmits([
           :class="{ 'recording': isRecording }"
         >
           <span class="btn-icon">🎤</span>
-          <span class="btn-text">{{ isRecording ? '正在录音...' : '语音输入' }}</span>
+          <span class="btn-text">{{ isRecording ? '点击停止录音' : '语音输入' }}</span>
           <span v-if="isRecording" class="wave-animation">
             <span class="wave-bar"></span>
             <span class="wave-bar"></span>
@@ -86,25 +96,39 @@ const emit = defineEmits([
           </span>
         </button>
         
-        <div v-if="isRecording" class="recording-indicator">
-          <span class="recording-dot"></span>
-          <span class="recording-label">录音中</span>
-          <span class="recording-time">{{ formatRecordingTime(recordingDuration) }}</span>
-        </div>
-        
-        <div class="nl-actions-right">
-          <button 
-            type="button" 
-            class="btn-submit" 
-            @click="$emit('submit')"
-            :disabled="isProcessing || !inputValue.trim() || isRecording"
-          >
-            {{ isProcessing ? '处理中...' : '✨ 创建日程' }}
-          </button>
+        <!-- 第二行：操作按钮组 -->
+        <div class="action-buttons-group">
+          <!-- 主要操作区 -->
+          <div class="primary-actions">
+            <button 
+              type="button" 
+              class="btn-parse" 
+              @click="$emit('parse-and-fill')"
+              :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
+              title="AI 解析后预填到表单，供您审查修改"
+            >
+              <span class="btn-emoji">📝</span>
+              <span class="btn-label">{{ isAIProcessing ? '解析中...' : '预填表单' }}</span>
+            </button>
+            
+            <button 
+              type="button" 
+              class="btn-submit" 
+              @click="$emit('submit')"
+              :disabled="isProcessing || !inputValue.trim() || isRecording"
+              title="直接创建日程（不经过审查）"
+            >
+              <span class="btn-emoji">✨</span>
+              <span class="btn-label">{{ isProcessing ? '处理中...' : '创建日程' }}</span>
+            </button>
+          </div>
+          
+          <!-- 次要操作区 -->
           <button 
             type="button" 
             class="btn-cancel" 
             @click="$emit('cancel')"
+            title="取消操作"
           >
             取消
           </button>
@@ -113,6 +137,7 @@ const emit = defineEmits([
     </div>
   </div>
 </template>
+
 
 <style scoped>
 .nl-mode {
@@ -195,7 +220,7 @@ const emit = defineEmits([
 .nl-input-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .nl-input-group textarea {
@@ -223,21 +248,7 @@ const emit = defineEmits([
   cursor: not-allowed;
 }
 
-.nl-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.nl-actions-right {
-  display: flex;
-  gap: 12px;
-  margin-left: auto;
-  align-items: center;
-}
-
+/* AI 处理状态指示器 */
 .ai-processing-indicator {
   display: flex;
   align-items: center;
@@ -249,7 +260,6 @@ const emit = defineEmits([
   color: #0284c7;
   font-size: 14px;
   font-weight: 500;
-  margin-top: 8px;
   animation: pulse-ai 1.5s infinite;
 }
 
@@ -274,27 +284,93 @@ const emit = defineEmits([
   }
 }
 
+/* 录音状态条 */
+.recording-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-radius: 8px;
+  border: 2px solid #fca5a5;
+  animation: pulse-bg 1.5s infinite;
+}
+
+.recording-dot {
+  width: 12px;
+  height: 12px;
+  background-color: #dc2626;
+  border-radius: 50%;
+  animation: pulse-dot 1s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
+}
+
+@keyframes pulse-bg {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+.recording-label {
+  color: #dc2626;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.recording-time {
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #991b1b;
+  font-size: 15px;
+  min-width: 55px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* 操作按钮区域 */
+.nl-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* 语音输入按钮 - 全宽大按钮 */
 .voice-btn {
+  width: 100%;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
   border-radius: 12px;
-  padding: 12px 20px;
-  font-size: 1rem;
+  padding: 16px 24px;
+  font-size: 1.05rem;
   font-weight: 600;
   color: white;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   position: relative;
   overflow: hidden;
+  min-height: 56px;
 }
 
 .voice-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+}
+
+.voice-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .voice-btn.recording {
@@ -313,17 +389,18 @@ const emit = defineEmits([
 }
 
 .voice-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
 .btn-icon {
-  font-size: 1.2rem;
+  font-size: 1.4rem;
 }
 
 .btn-text {
   font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .wave-animation {
@@ -331,11 +408,11 @@ const emit = defineEmits([
   align-items: center;
   gap: 3px;
   margin-left: 8px;
-  height: 20px;
+  height: 24px;
 }
 
 .wave-bar {
-  width: 3px;
+  width: 4px;
   height: 100%;
   background-color: rgba(255, 255, 255, 0.9);
   border-radius: 2px;
@@ -348,99 +425,182 @@ const emit = defineEmits([
 
 @keyframes wave {
   0%, 100% {
-    height: 4px;
+    height: 6px;
     opacity: 0.5;
   }
   50% {
-    height: 16px;
+    height: 20px;
     opacity: 1;
   }
 }
 
-.recording-indicator {
+/* 操作按钮组 */
+.action-buttons-group {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  border-radius: 20px;
-  font-size: 14px;
-  color: #dc2626;
-  font-weight: 500;
-  animation: pulse-bg 1.5s infinite;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.recording-dot {
-  width: 10px;
-  height: 10px;
-  background-color: #dc2626;
-  border-radius: 50%;
-  animation: pulse-dot 1s infinite;
+.primary-actions {
+  display: flex;
+  gap: 12px;
+  flex: 1;
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-@keyframes pulse-bg {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.recording-label {
-  margin-right: 4px;
-  font-weight: 500;
-}
-
-.recording-time {
-  font-family: 'Courier New', monospace;
-  font-weight: 700;
-  letter-spacing: 1px;
-  min-width: 50px;
-  text-align: center;
-}
-
-.btn-submit {
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+/* 预填表单按钮 */
+.btn-parse {
+  flex: 1;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
   color: white;
   border: none;
-  border-radius: 8px;
-  padding: 12px 24px;
-  font-size: 16px;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(56, 239, 125, 0.4);
+  box-shadow: 0 4px 15px rgba(245, 87, 108, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+}
+
+.btn-parse:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 87, 108, 0.5);
+}
+
+.btn-parse:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-parse:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 创建日程按钮 */
+.btn-submit {
+  flex: 1;
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(56, 239, 125, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
 }
 
 .btn-submit:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.6);
+  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.5);
+}
+
+.btn-submit:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-submit:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+  box-shadow: none;
 }
 
+/* 取消按钮 */
 .btn-cancel {
-  background: linear-gradient(135deg, #e0e0e0 0%, #f5f5f5 100%);
-  color: #555;
-  border: none;
-  border-radius: 8px;
-  padding: 12px 24px;
-  font-size: 16px;
+  background: transparent;
+  color: #64748b;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 24px;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  min-height: 48px;
+  white-space: nowrap;
 }
 
 .btn-cancel:hover {
-  background: linear-gradient(135deg, #d0d0d0 0%, #e8e8e8 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
+  transform: translateY(-1px);
+}
+
+.btn-cancel:active {
+  transform: translateY(0);
+}
+
+/* Emoji 图标样式 */
+.btn-emoji {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.btn-label {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* 响应式设计 - 平板和手机 */
+@media (max-width: 768px) {
+  .form-container {
+    padding: 1.5rem;
+  }
+  
+  .action-buttons-group {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .primary-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+  
+  .btn-parse,
+  .btn-submit,
+  .btn-cancel {
+    width: 100%;
+  }
+  
+  .voice-btn {
+    padding: 14px 20px;
+    font-size: 1rem;
+  }
+}
+
+/* 超小屏幕优化 */
+@media (max-width: 480px) {
+  .form-container {
+    padding: 1.2rem;
+  }
+  
+  .form-header h2 {
+    font-size: 1.1rem;
+  }
+  
+  .nl-examples {
+    padding: 0.8rem;
+  }
+  
+  .nl-examples li {
+    font-size: 0.85rem;
+  }
 }
 </style>

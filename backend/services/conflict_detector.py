@@ -57,8 +57,23 @@ def detect_schedule_conflicts(user_id, new_start_time, new_end_time, exclude_id=
     return conflicts
 
 
-
 class ConflictDetector:
+    
+    @staticmethod
+    def detect_conflicts(user_id, new_start_time, new_end_time, exclude_id=None):
+        """
+        检测日程冲突(ConflictDetector类的静态方法)
+        
+        Args:
+            user_id: 用户 ID
+            new_start_time: 新日程开始时间
+            new_end_time: 新日程结束时间
+            exclude_id: 要排除的日程 ID（用于编辑时检查）
+            
+        Returns:
+            冲突列表
+        """
+        return detect_schedule_conflicts(user_id, new_start_time, new_end_time, exclude_id)
 
     @staticmethod
     def suggest_alternative_slots(user_id, original_start_time, duration_minutes=60, exclude_id=None):

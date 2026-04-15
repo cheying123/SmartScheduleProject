@@ -102,12 +102,64 @@ def create_schedule(current_user):
         local_dt = datetime.fromisoformat(data['start_time'].replace('Z', ''))
         schedule_date = local_dt.strftime('%Y-%m-%d')
         
+        # 【新增】计算结束时间
+        end_dt = None
+        if data.get('end_time'):
+            end_dt = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+        else:
+            end_dt = local_dt + timedelta(hours=1)
+        
+        # 【新增】冲突检测
+        conflicts = ConflictDetector.detect_conflicts(
+            current_user.id,
+            local_dt,
+            end_dt
+        )
+        
+        if conflicts:
+            # 【新增】当检测到冲突时，自动生成建议方案
+            duration = 60
+            if data.get('end_time'):
+                duration = int((end_dt - local_dt).total_seconds() / 60)
+            
+            suggestions = ConflictDetector.suggest_alternative_slots(
+                current_user.id, 
+                local_dt, 
+                duration
+            )
+            
+            def utc_to_local(utc_dt):
+                if utc_dt is None:
+                    return None
+                timezone_offset = data.get('timezone_offset', 480)
+                return utc_dt + timedelta(minutes=timezone_offset)
+            
+            return jsonify({
+                'error': '检测到日程冲突',
+                'conflicts': [{
+                    'schedule_id': c['schedule_id'],
+                    'title': c['title'],
+                    'start_time': utc_to_local(c['start_time']).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(c['end_time']).strftime('%Y-%m-%dT%H:%M:%S') if c['end_time'] else None
+                } for c in conflicts],
+                'suggestions': [{
+                    'start_time': utc_to_local(datetime.fromisoformat(s['start_time'])).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(datetime.fromisoformat(s['end_time'])).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'reason': s['reason']
+                } for s in suggestions],
+                'parsed_data': {
+                    'title': data['title'],
+                    'start_time': utc_to_local(local_dt).strftime('%Y-%m-%dT%H:%M:%S'),
+                    'end_time': utc_to_local(end_dt).strftime('%Y-%m-%dT%H:%M:%S') if end_dt else None
+                }
+            }), 409
+        
         new_schedule = Schedule(
             user_id=current_user.id,
             title=data['title'],
             content=data.get('content', ''),
             start_time=local_dt,
-            end_time=datetime.fromisoformat(data['end_time'].replace('Z', '')) if data.get('end_time') else None,
+            end_time=end_dt if data.get('end_time') else None,
             weather_info=None,
             priority=data.get('priority', 1),
             is_recurring=data.get('is_recurring', False),
@@ -259,7 +311,7 @@ def delete_schedule(current_user, id):
 @schedules_bp.route('/natural-language', methods=['POST'])
 @token_required
 def create_schedule_natural(current_user):
-    """使用自然语言创建日程"""
+    """使用自然语言创建日程（直接创建）"""
     data = request.get_json()
     
     if not data or 'text' not in data:
@@ -366,6 +418,50 @@ def create_schedule_natural(current_user):
         
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': f'解析失败：{str(e)}'}), 500
+
+
+@schedules_bp.route('/nlp-parse', methods=['POST'])
+@token_required
+def parse_natural_language_only(current_user):
+    """仅解析自然语言，不创建日程（用于预填表单）"""
+    data = request.get_json()
+    
+    if not data or 'text' not in data:
+        return jsonify({'error': '缺少文本指令'}), 400
+    
+    timezone_offset = data.get('timezone_offset', 480)
+    
+    try:
+        parsed_data = parse_natural_language(data['text'], timezone_offset)
+        
+        if not parsed_data:
+            return jsonify({'error': '解析失败，无法理解您的指令'}), 400
+        
+        # 转换为本地时间格式供前端显示
+        def utc_to_local_iso(utc_dt):
+            if utc_dt is None:
+                return ''
+            local_dt = utc_dt + timedelta(minutes=timezone_offset)
+            return local_dt.strftime('%Y-%m-%dT%H:%M')
+        
+        # 返回解析结果，但不创建数据库记录
+        result = {
+            'title': parsed_data['title'],
+            'content': parsed_data.get('content', ''),
+            'start_time': utc_to_local_iso(parsed_data['start_time']),
+            'end_time': utc_to_local_iso(parsed_data.get('end_time')),
+            'priority': parsed_data.get('priority', 1),
+            'is_recurring': parsed_data.get('is_recurring', False),
+            'recurring_pattern': parsed_data.get('recurring_pattern'),
+            'tags': parsed_data.get('tags', []),
+            'ai_parsed': parsed_data.get('ai_parsed', False),
+            'confidence': 'high' if parsed_data.get('ai_parsed') else 'medium'
+        }
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
         return jsonify({'error': f'解析失败：{str(e)}'}), 500
 
 @schedules_bp.route('/check-conflict', methods=['POST'])
