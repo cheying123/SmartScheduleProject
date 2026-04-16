@@ -564,3 +564,23 @@ def force_create_schedule(current_user):
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
+
+
+@schedules_bp.route('/<int:id>/complete', methods=['PATCH'])
+@token_required
+def mark_schedule_complete(current_user, id):
+    """标记日程为已完成/未完成"""
+    schedule = Schedule.query.get_or_404(id)
+    
+    if schedule.user_id != current_user.id:
+        return jsonify({'error': '无权操作此日程'}), 403
+    
+    # 直接切换完成状态，不需要请求体
+    schedule.is_completed = not schedule.is_completed
+    
+    db.session.commit()
+    
+    return jsonify({
+        'message': '状态更新成功',
+        'schedule': schedule.to_dict()
+    }), 200

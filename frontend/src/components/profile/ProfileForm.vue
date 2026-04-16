@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { MapPin, User, Mail, Bell, Search, X } from 'lucide-vue-next'
+import { MapPin, User, Mail, Bell, Search, X, Clock } from 'lucide-vue-next'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
 
@@ -119,6 +119,21 @@ function handleClickOutside(event) {
 if (typeof window !== 'undefined') {
   window.addEventListener('click', handleClickOutside)
 }
+
+/**
+ * 更新工作时间偏好
+ */
+function updateWorkHours(field, value) {
+  const currentHours = props.profile.preferred_work_hours || {}
+  emit('update:profile', {
+    ...props.profile,
+    preferred_work_hours: {
+      ...currentHours,
+      [field]: value
+    }
+  })
+}
+
 </script>
 
 <template>
@@ -285,6 +300,45 @@ if (typeof window !== 'undefined') {
             <span class="slider"></span>
           </label>
         </div>
+      </div>
+      
+      <!-- 工作时间偏好设置 -->
+      <div class="form-section">
+        <label class="field-label">
+          <Clock :size="16" />
+          <span>工作时间偏好</span>
+          <span class="optional">(可选)</span>
+        </label>
+        
+        <div class="work-hours-group">
+          <div class="time-input-wrapper">
+            <label for="work-start" class="time-label">开始时间</label>
+            <input 
+              id="work-start" 
+              type="time" 
+              :value="profile.preferred_work_hours?.start || '09:00'"
+              @input="updateWorkHours('start', $event.target.value)"
+              class="styled-input time-input"
+            >
+          </div>
+          
+          <div class="time-separator">至</div>
+          
+          <div class="time-input-wrapper">
+            <label for="work-end" class="time-label">结束时间</label>
+            <input 
+              id="work-end" 
+              type="time" 
+              :value="profile.preferred_work_hours?.end || '18:00'"
+              @input="updateWorkHours('end', $event.target.value)"
+              class="styled-input time-input"
+            >
+          </div>
+        </div>
+        
+        <small class="field-hint">
+          ⏰ 用于智能排程功能，系统会在此时间段内自动安排任务（默认：09:00-18:00）
+        </small>
       </div>
       
       <!-- 表单按钮 -->
@@ -846,5 +900,47 @@ input:checked + .slider:before {
   .city-dropdown {
     max-height: 250px;
   }
+}
+
+/* ===== 工作时间偏好样式 ===== */
+.work-hours-group {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.time-input-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.time-label {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.time-separator {
+  padding-bottom: 0.5rem;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.time-input {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.time-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.time-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 </style>

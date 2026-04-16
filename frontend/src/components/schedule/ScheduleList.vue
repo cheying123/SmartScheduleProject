@@ -41,7 +41,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['edit', 'delete'])
+const emit = defineEmits(['edit', 'delete', 'complete'])
 </script>
 
 <template>
@@ -88,6 +88,7 @@ const emit = defineEmits(['edit', 'delete'])
               :schedule="schedule"
               @edit="$emit('edit', $event)"
               @delete="$emit('delete', schedule.id)"
+              @complete="$emit('complete', $event)"
             />
           </ul>
         </div>
@@ -112,6 +113,7 @@ const emit = defineEmits(['edit', 'delete'])
               :schedule="schedule"
               @edit="$emit('edit', $event)"
               @delete="$emit('delete', schedule.id)"
+              @complete="$emit('complete', $event)"
             />
           </ul>
         </div>

@@ -21,7 +21,11 @@ export function useProfile(userStore, API_URL) {
     email: '',
     location: '',
     location_name: '',
-    weather_alerts_enabled: true
+    weather_alerts_enabled: true,
+    preferred_work_hours: {
+      start: '09:00',
+      end: '18:00'
+    }
   })
   
   const isLocating = ref(false)
@@ -36,7 +40,11 @@ export function useProfile(userStore, API_URL) {
       email: userStore.user?.email || '',
       location: userStore.user?.location || '',
       location_name: userStore.user?.location_name || '',
-      weather_alerts_enabled: userStore.user?.weather_alerts_enabled !== false
+      weather_alerts_enabled: userStore.user?.weather_alerts_enabled !== false,
+      preferred_work_hours: userStore.user?.preferred_work_hours || {
+        start: '09:00',
+        end: '18:00'
+      }
     }
     isProfileEditModalVisible.value = true
   }

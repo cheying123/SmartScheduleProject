@@ -38,7 +38,7 @@ def create_app():
         app, 
         resources={r"/api/*": {"origins": "*"}}, 
         supports_credentials=True,
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-Requested-With"]
     )
     

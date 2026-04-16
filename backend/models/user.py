@@ -29,5 +29,6 @@ class User(db.Model):
             'created_at': self.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if self.created_at else None,
             'location': self.location,
             'location_name': self.location_name,
-            'weather_alerts_enabled': self.weather_alerts_enabled
+            'weather_alerts_enabled': self.weather_alerts_enabled,
+            'preferred_work_hours': self.preferred_work_hours
         }

@@ -246,6 +246,23 @@ export function useSchedule(userStore, API_URL) {
   }
 
   /**
+   * 标记日程为已完成/未完成
+   * @param {number} id - 日程 ID
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async function markScheduleComplete(id) {
+    try {
+      await axios.patch(`${API_URL}/schedules/${id}/complete`)
+      await fetchSchedules()
+      return true
+    } catch (err) {
+      console.error('更新完成状态失败:', err)
+      alert('更新状态失败，请重试')
+      return false
+    }
+  }
+
+  /**
    * 重置日程表单
    */
   function resetScheduleForm() {
@@ -263,6 +280,7 @@ export function useSchedule(userStore, API_URL) {
     fetchSchedules,
     addSchedule,
     deleteSchedule,
+    markScheduleComplete,
     openEditModal,
     closeEditModal,
     saveEdit,

@@ -19,12 +19,13 @@ export function getCurrentDateTime() {
 
 /**
  * 将 ISO 字符串转换为 datetime-local 输入框的格式
- * @param {string} isoString - ISO 格式的日期字符串
- * @returns {string} 格式：2026-03-30T15:45
+ * @param {string} isoString - ISO 格式的日期字符串 (UTC)
+ * @returns {string} 格式：2026-03-30T15:45 (本地时间)
  */
 export function formatDateForInput(isoString) {
   if (!isoString) return ''
-  const date = new Date(isoString)
+  // 确保浏览器将其识别为 UTC 时间
+  const date = new Date(isoString.endsWith('Z') ? isoString : isoString + 'Z')
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -34,17 +35,22 @@ export function formatDateForInput(isoString) {
 }
 
 /**
- * 格式化日期显示
- * @param {string} isoString - ISO 格式的日期字符串
+ * 格式化日期显示（核心修复：确保 UTC 转本地）
+ * @param {string} isoString - ISO 格式的日期字符串 (UTC)
  * @param {string} format - 格式类型：'time' (时间) 或 'full' (完整)
- * @returns {string} 格式化后的日期字符串
+ * @returns {string} 格式化后的本地时间字符串
  */
 export function formatDate(isoString, format = 'time') {
   if (!isoString) return ''
-  const date = new Date(isoString)
   
+  // 关键修复：如果字符串不带 Z，手动补上以强制浏览器按 UTC 解析
+  const utcString = isoString.endsWith('Z') ? isoString : isoString + 'Z'
+  const date = new Date(utcString)
+  
+  if (isNaN(date.getTime())) return ''
+
   if (format === 'time') {
-    // 只显示时间：15:45
+    // 只显示时间：15:45 (自动转为本地时区)
     return date.toLocaleTimeString('zh-CN', { 
       hour: '2-digit', 
       minute: '2-digit', 
@@ -54,6 +60,13 @@ export function formatDate(isoString, format = 'time') {
   
   // 显示完整日期时间
   return date.toLocaleString('zh-CN')
+}
+
+/**
+ * 获取日程的本地化开始时间（用于列表展示）
+ */
+export function getLocalStartTime(isoString) {
+  return formatDate(isoString, 'time')
 }
 
 /**

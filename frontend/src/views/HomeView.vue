@@ -1,9 +1,7 @@
-
-
 <script setup>
-import { ref, onMounted, computed, onUnmounted,watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart, Sparkles, Search, Filter } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart, Sparkles, Search, Filter, MessageSquare } from 'lucide-vue-next'
 
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
@@ -27,13 +25,120 @@ import NaturalLanguageInput from '@/components/schedule/NaturalLanguageInput.vue
 import ProfileCard from '@/components/profile/ProfileCard.vue'
 import ProfileForm from '@/components/profile/ProfileForm.vue'
 import NotificationList from '@/components/common/NotificationList.vue'
-import ConflictDialog from '@/components/schedule/ConflictDialog.vue'  // ← 新增这一行
-
-
+import ConflictDialog from '@/components/schedule/ConflictDialog.vue'
+import DashboardStats from '@/components/analytics/DashboardStats.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 const API_URL = 'http://127.0.0.1:5000/api'
+
+// 新增：每日摘要状态
+const dailyBriefing = ref(null)
+const isBriefingLoading = ref(false)
+
+// 统计面板引用
+const statsPanel = ref(null)
+
+// FAB 快速添加按钮状态
+const showFabMenu = ref(false)
+
+// 新增：自动排程状态
+const isAutoScheduleModalVisible = ref(false)
+const autoScheduleTasksInput = ref('') // 格式示例：复习数学 60, 跑步 30
+const isAutoScheduling = ref(false)
+
+async function handleAutoSchedule() {
+  if (!autoScheduleTasksInput.value.trim()) return
+  
+  try {
+    isAutoScheduling.value = true
+    
+    // 解析输入字符串为任务数组
+    const tasks = autoScheduleTasksInput.value.split(/[,\n]/).map(item => {
+      const parts = item.trim().split(/\s+/)
+      const duration = parseInt(parts.pop()) || 30 // 默认30分钟
+      const title = parts.join(' ')
+      return { title, duration_minutes: duration }
+    }).filter(t => t.title)
+    
+    const response = await axios.post(`${API_URL}/analytics/auto-schedule`, 
+      { tasks, days: 3 },
+      { headers: { 'Authorization': `Bearer ${userStore.token}` } }
+    )
+    
+    if (response.data.success) {
+      showNotification({
+        type: 'success',
+        message: response.data.message + (response.data.unscheduled.length > 0 ? `\n未安排: ${response.data.unscheduled.join(', ')}` : '')
+      })
+      fetchSchedules(API_URL) // 刷新日程列表
+      if (statsPanel.value) statsPanel.value.fetchStats() // 刷新统计数据
+      isAutoScheduleModalVisible.value = false
+      autoScheduleTasksInput.value = ''
+    }
+  } catch (err) {
+    showNotification({ type: 'error', message: '智能排程失败，请稍后再试' })
+  } finally {
+    isAutoScheduling.value = false
+  }
+}
+
+// ===== FAB 快速添加按钮相关方法 =====
+
+/**
+ * 切换 FAB 菜单显示状态
+ */
+function toggleFabMenu() {
+  showFabMenu.value = !showFabMenu.value
+}
+
+/**
+ * 打开语音输入模式
+ */
+function openNaturalLanguageMode() {
+  showFabMenu.value = false
+  activeTab.value = 'schedule'
+  setTimeout(() => {
+    const nlpInput = document.querySelector('.nlp-input-container')
+    if (nlpInput) {
+      nlpInput.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const input = nlpInput.querySelector('input, textarea')
+      if (input) input.focus()
+    }
+  }, 100)
+}
+
+/**
+ * 打开手动创建表单
+ */
+function openManualForm() {
+  showFabMenu.value = false
+  activeTab.value = 'schedule'
+  isFormVisible.value = true
+}
+
+/**
+ * 打开智能排程模态框
+ */
+function openAutoScheduleModal() {
+  showFabMenu.value = false
+  activeTab.value = 'schedule'
+  isAutoScheduleModalVisible.value = true
+}
+
+async function fetchDailyBriefing() {
+  try {
+    isBriefingLoading.value = true
+    const response = await axios.get(`${API_URL}/analytics/daily-briefing`, {
+      headers: { 'Authorization': `Bearer ${userStore.token}` }
+    })
+    dailyBriefing.value = response.data
+  } catch (err) {
+    console.error('获取每日摘要失败:', err)
+  } finally {
+    isBriefingLoading.value = false
+  }
+}
 
 // 使用 Composables
 const {
@@ -46,6 +151,7 @@ const {
   fetchSchedules,
   addSchedule: originalAddSchedule,
   deleteSchedule,
+  markScheduleComplete,
   openEditModal,
   closeEditModal,
   saveEdit,
@@ -259,7 +365,6 @@ const notification = ref({
   duration: 3000
 })
 
-const dailyBriefing = ref(null)
 const notificationFilter = ref('all')
 
 // 通知统计与分组
@@ -541,19 +646,8 @@ watch(() => userStore.user, (newUser) => {
 onMounted(async () => {
   currentTimezone.value = getTimezoneInfo()
 
-   // 获取每日简报
-  try {
-    const res = await axios.get(`${API_URL}/assistant/daily-briefing`, {
-      headers: { 'Authorization': `Bearer ${userStore.token}` }
-    })
-    dailyBriefing.value = res.data
-    // ✅ 多模态：进入首页时，如果有关键建议，可以轻声播报
-    if (res.data.ai_advice) {
-      speak(res.data.ai_advice) 
-    }
-  } catch (e) {
-    console.error('获取简报失败', e)
-  }
+  // 获取每日智能摘要
+  await fetchDailyBriefing()
   
   if (!userStore.user && userStore.token) {
     try {
@@ -627,35 +721,72 @@ onUnmounted(() => {
             <PlusCircle :size="20" />
             <span>新建日程</span>
           </button>
+          
+          <button 
+            v-if="activeTab === 'schedule'"
+            class="auto-schedule-btn" 
+            @click="isAutoScheduleModalVisible = true"
+          >
+            <Sparkles :size="20" />
+            <span>智能排程</span>
+          </button>
         </div>
       </header>
 
       <!-- 日程页面 -->
       <div v-if="activeTab === 'schedule'" class="tab-content">
-        <!-- ✅ 新增：每日智能简报卡片 -->
-      <div v-if="dailyBriefing" class="briefing-card">
-        <div class="briefing-header">
-          <Sparkles :size="20" color="#5E72E4" />
-          <h3>早安！这是您今天的智能简报</h3>
-          <button class="replay-btn" @click="handleSpeak(dailyBriefing.ai_advice)">
-            🔊 重播建议
-          </button>
-        </div>
-        <div class="briefing-content">
-          <p class="ai-advice">"{{ dailyBriefing.ai_advice }}"</p>
-          <div class="briefing-details">
-            <span class="detail-item">
-              <Calendar :size="16" /> 今日日程：{{ dailyBriefing.schedule_count }} 项
-            </span>
-            <span class="detail-item" v-if="dailyBriefing.weather && dailyBriefing.weather.text !== '未知'">
-              <Sun :size="16" /> {{ dailyBriefing.weather.text }} {{ dailyBriefing.weather.temperature }}°C
-            </span>
-            <span v-else class="detail-item" style="color: #ff9800;">
-              ⚠️ 天气信息暂不可用
-            </span>
+        <!-- ✅ 优化：每日智能摘要卡片 (Modern UI) -->
+        <div v-if="dailyBriefing && dailyBriefing.message" class="briefing-card-modern">
+          <div class="briefing-icon-wrapper">
+            <MessageSquare :size="24" color="#667eea" />
+          </div>
+          <div class="briefing-body">
+            <div class="briefing-header-row">
+              <h3>🌤️ 今日智能提醒</h3>
+              <button 
+                v-if="dailyBriefing.ai_advice" 
+                class="speak-btn-mini" 
+                @click="handleSpeak(dailyBriefing.ai_advice)"
+                title="语音播报"
+              >
+                🔊
+              </button>
+            </div>
+            
+            <p class="briefing-text">
+              {{ dailyBriefing.ai_advice || dailyBriefing.message || '暂无今日建议' }}
+            </p>
+            
+            <div class="briefing-meta">
+              <span class="meta-item">
+                <Calendar :size="14" /> 
+                {{ dailyBriefing.schedule_count || 0 }} 个日程
+              </span>
+              
+              <span v-if="dailyBriefing.weather && dailyBriefing.weather.text !== '未知'" class="meta-item weather-item">
+                <Sun :size="14" /> 
+                {{ dailyBriefing.weather.text }} {{ dailyBriefing.weather.temperature }}°C
+              </span>
+
+              <button 
+                class="refresh-briefing" 
+                @click="fetchDailyBriefing" 
+                :disabled="isBriefingLoading"
+              >
+                <Sparkles :size="14" /> 
+                {{ isBriefingLoading ? '生成中...' : '刷新建议' }}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+        
+        <!-- 统计面板 -->
+        <DashboardStats 
+          ref="statsPanel"
+          :API_URL="API_URL"
+          :token="userStore.token"
+        />
+        
         <ScheduleList
           :schedules="filteredSchedules"
           :upcomingSchedules="upcomingSchedules"
@@ -668,6 +799,7 @@ onUnmounted(() => {
           :searchQuery="searchQuery"
           @edit="openEditModal"
           @delete="deleteSchedule"
+          @complete="markScheduleComplete"
         />
       </div>
 
@@ -947,83 +1079,212 @@ onUnmounted(() => {
       </div>
     </transition>
 
-     <!-- 冲突解决对话框 -->  <!-- ← 从这里开始新增 -->
+     <!-- 冲突解决对话框 -->
     <transition name="fade">
-      <ConflictDialog
-        v-if="conflictDialog"
-        :conflict-data="conflictDialog"
-        :is-processing="isAIProcessing"
-        @confirm="forceCreateSchedule"
-        @cancel="() => { conflictDialog = null; naturalLanguageInput = '' }"
-        @apply-suggestion="handleApplySuggestion" 
-      />
-    </transition>
-
-    <!-- 通知提示 -->
-    <transition name="slide-fade">
-      <div v-if="notification.show" class="notification-toast" :class="notification.type">
-        <div class="notification-content">
-          <span class="notification-icon">
-            {{ notification.type === 'success' ? '✓' : '✕' }}
-          </span>
-          <span class="notification-message">{{ notification.message }}</span>
-        </div>
-        <div class="notification-progress"></div>
+      <div v-if="conflictDialogVisible" class="form-overlay" @click.self="conflictDialogVisible = false">
+        <ConflictDialog
+          :conflict-info="conflictInfo"
+          @resolve="handleResolveConflict"
+          @cancel="conflictDialogVisible = false"
+        />
       </div>
     </transition>
 
+    <!-- 弹窗：智能排程助手 -->
+    <transition name="fade">
+      <div v-if="isAutoScheduleModalVisible" class="form-overlay" @click.self="isAutoScheduleModalVisible = false">
+        <div class="form-container auto-schedule-modal">
+          <div class="modal-header">
+            <Sparkles :size="24" color="#667eea" />
+            <h2>✨ 智能一键排程</h2>
+          </div>
+          <div class="modal-body">
+            <p class="modal-desc">请输入待办事项，格式：<strong>任务名称 时长(分钟)</strong>，多个任务用逗号或换行分隔。</p>
+            <textarea 
+              v-model="autoScheduleTasksInput" 
+              placeholder="例如：&#10;复习数学 60&#10;跑步 30&#10;阅读英语 45"
+              class="auto-schedule-textarea"
+            ></textarea>
+            <div class="schedule-preview-hint">
+              💡 系统将根据您的空闲时间自动安排在未来 3 天内。
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-cancel" @click="isAutoScheduleModalVisible = false">取消</button>
+            <button 
+              type="button" 
+              class="btn-submit btn-auto-schedule" 
+              @click="handleAutoSchedule"
+              :disabled="isAutoScheduling || !autoScheduleTasksInput.trim()"
+            >
+              <Sparkles :size="16" />
+              {{ isAutoScheduling ? '正在排程...' : '开始智能排程' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+    
+    <!-- FAB 快速添加按钮 -->
+    <div class="fab-container">
+      <!-- 展开菜单 -->
+      <div v-if="showFabMenu" class="fab-menu">
+        <button class="fab-menu-item" @click="openNaturalLanguageMode">
+          <span class="menu-icon">🎤</span>
+          <span>语音输入</span>
+        </button>
+        <button class="fab-menu-item" @click="openManualForm">
+          <span class="menu-icon">📝</span>
+          <span>手动创建</span>
+        </button>
+        <button class="fab-menu-item" @click="openAutoScheduleModal">
+          <span class="menu-icon">🤖</span>
+          <span>智能排程</span>
+        </button>
+      </div>
+      
+      <!-- 主按钮 -->
+      <button class="fab-main-btn" @click="toggleFabMenu" title="快速添加">
+        <PlusCircle :size="28" />
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ✅ 新增：简报卡片样式 */
-.briefing-card {
+/* ✅ 优化：现代简报卡片样式 */
+.briefing-card-modern {
+  display: flex;
+  gap: 20px;
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid #eef2f7;
+  box-shadow: 0 10px 30px -10px rgba(102, 126, 234, 0.15);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.briefing-card-modern::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: linear-gradient(to bottom, #667eea, #764ba2);
+}
+
+.briefing-card-modern:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -10px rgba(102, 126, 234, 0.25);
+}
+
+.briefing-icon-wrapper {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
   background: linear-gradient(135deg, #f6f9fc 0%, #eef2f9 100%);
   border-radius: 16px;
-  padding: 20px;
-  margin-bottom: 24px;
-  border: 1px solid #e6e9f0;
-  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.08);
-  transition: all 0.3s ease;
-}
-
-.briefing-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 16px rgba(94, 114, 228, 0.12);
-}
-
-.briefing-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  color: #5E72E4;
+  justify-content: center;
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.8);
 }
 
-.briefing-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.ai-advice {
-  font-size: 1rem;
-  color: #32325d;
-  line-height: 1.6;
-  margin-bottom: 12px;
-  font-style: italic;
-}
-
-.briefing-details {
+.briefing-body {
+  flex: 1;
   display: flex;
-  gap: 16px;
-  font-size: 0.9rem;
-  color: #8898aa;
+  flex-direction: column;
+  justify-content: center;
 }
 
-.detail-item {
+.briefing-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.briefing-header-row h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #2d3748;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.speak-btn-mini {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  padding: 4px;
+}
+
+.speak-btn-mini:hover {
+  opacity: 1;
+}
+
+.briefing-text {
+  margin: 0 0 16px 0;
+  color: #4a5568;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.briefing-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.meta-item {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 0.875rem;
+  color: #718096;
+  font-weight: 500;
+}
+
+.weather-item {
+  color: #ed8936;
+}
+
+.refresh-briefing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 5px rgba(118, 75, 162, 0.2);
+}
+
+.refresh-briefing:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(118, 75, 162, 0.3);
+}
+
+.refresh-briefing:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
 }
 
 /* ===== 主布局样式 ===== */
@@ -1132,6 +1393,54 @@ onUnmounted(() => {
 .add-btn-top:hover {
   background-color: #4c5fd5;
   transform: translateY(-2px);
+}
+
+/* ✨ 智能排程按钮 - 科技感优化 */
+.auto-schedule-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 25px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(118, 75, 162, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 按钮光效动画 */
+.auto-schedule-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: 0.5s;
+}
+
+.auto-schedule-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(118, 75, 162, 0.5);
+}
+
+.auto-schedule-btn:hover::before {
+  left: 100%;
+}
+
+.auto-schedule-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.auto-schedule-btn:hover svg {
+  transform: rotate(15deg) scale(1.1);
 }
 
 .tab-content {
@@ -1482,6 +1791,22 @@ onUnmounted(() => {
 
 .reminder-medium .progress-bar {
   background: linear-gradient(90deg, #ffc107 0%, #ffd54f 100%);
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation: progress-shine 2s infinite;
+}
+
+@keyframes progress-shine {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
 }
 
 /* 快速操作按钮 */
@@ -1970,7 +2295,7 @@ onUnmounted(() => {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.3),
+    rgba(255,255,255,0.3),
     transparent
   );
   animation: shimmer 2s infinite;
@@ -1983,5 +2308,151 @@ onUnmounted(() => {
   100% {
     transform: translateX(100%);
   }
+}
+
+/* ===== 智能排程弹窗样式 ===== */
+.auto-schedule-modal {
+  max-width: 500px;
+  border-radius: 16px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 1rem;
+  color: #2d3748;
+}
+
+.modal-desc {
+  font-size: 0.9rem;
+  color: #718096;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.auto-schedule-textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  background: #f8fafc;
+}
+
+.auto-schedule-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.schedule-preview-hint {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #667eea;
+  background: #f6f9fc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+}
+
+.btn-auto-schedule {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-auto-schedule:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(118, 75, 162, 0.3);
+}
+
+.btn-auto-schedule:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ===== FAB 快速添加按钮 ===== */
+.fab-container {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 1000;
+}
+
+.fab-main-btn {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  font-size: 1.5rem;
+}
+
+.fab-main-btn:hover {
+  transform: scale(1.1) rotate(90deg);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+
+.fab-menu {
+  position: absolute;
+  bottom: 70px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fab-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  background: white;
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  color: #32325D;
+  font-weight: 500;
+}
+
+.fab-menu-item:hover {
+  transform: translateX(-5px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background: #f8f9fe;
+}
+
+.fab-menu-item .menu-icon {
+  font-size: 1.2rem;
 }
 </style>

@@ -99,10 +99,59 @@ class AIService:
             return ai_message
             
         except Exception as e:
-            print(f"❌ AI 调用失败：{str(e)}")
+            print(f"❌ AI 对话错误：{str(e)}")
             import traceback
             traceback.print_exc()
             return f"抱歉，AI 服务暂时不可用：{str(e)}"
+
+    @staticmethod
+    def generate_text(prompt, max_tokens=200):
+        """
+        通用文本生成方法（用于每日摘要等场景）
+        
+        Args:
+            prompt: 提示词
+            max_tokens: 最大生成 token 数
+            
+        Returns:
+            生成的文本内容
+        """
+        service = AIService()
+        if not service.api_key:
+            return "⚠️ AI 功能未配置"
+        
+        try:
+            headers = {
+                'Authorization': f'Bearer {service.api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': service.model,
+                'input': {
+                    'messages': [{'role': 'user', 'content': prompt}]
+                },
+                'parameters': {
+                    'temperature': 0.3,  # 降低随机性，让摘要更稳定
+                    'max_tokens': max_tokens
+                }
+            }
+            
+            response = requests.post(service.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            # 解析响应
+            if 'output' in result and 'choices' in result['output']:
+                return result['output']['choices'][0]['message']['content']
+            elif 'output' in result and 'text' in result['output']:
+                return result['output']['text']
+            else:
+                return "抱歉，无法生成摘要"
+                
+        except Exception as e:
+            print(f"❌ 文本生成失败：{str(e)}")
+            return "抱歉，AI 服务暂时繁忙，请稍后再试。"
     
     def _build_system_prompt(self, user_data):
         """构建系统提示词"""

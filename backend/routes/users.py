@@ -39,6 +39,10 @@ def update_profile(current_user):
         if 'weather_alerts_enabled' in data:
             current_user.weather_alerts_enabled = data['weather_alerts_enabled']
         
+        # 处理工作时间偏好
+        if 'preferred_work_hours' in data:
+            current_user.preferred_work_hours = data['preferred_work_hours']
+        
         db.session.commit()
         
         result = current_user.to_dict()

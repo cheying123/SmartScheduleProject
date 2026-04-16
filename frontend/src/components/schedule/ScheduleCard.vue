@@ -14,7 +14,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['edit', 'delete'])
+const emit = defineEmits(['edit', 'delete', 'complete'])
 
 function handleEdit() {
   emit('edit', props.schedule)
@@ -24,9 +24,69 @@ function handleDelete() {
   emit('delete', props.schedule.id)
 }
 
+function handleComplete() {
+  emit('complete', props.schedule.id)
+}
+
+/**
+ * 判断日程是否已开始（当前时间 >= 开始时间）
+ */
 function isPastSchedule(startTime) {
   if (!startTime) return false
   return new Date(startTime) < new Date()
+}
+
+/**
+ * 判断日程是否已结束（当前时间 > 结束时间，或没有结束时间但已开始超过1小时）
+ */
+function isScheduleEnded(startTime, endTime) {
+  if (!startTime) return false
+  
+  const now = new Date()
+  const start = new Date(startTime)
+  
+  // 如果有结束时间，判断当前时间是否超过结束时间
+  if (endTime) {
+    const end = new Date(endTime)
+    return now > end
+  }
+  
+  // 如果没有结束时间，假设持续时间为1小时，判断是否已超过
+  const assumedEndTime = new Date(start.getTime() + 60 * 60 * 1000) // 开始时间 + 1小时
+  return now > assumedEndTime
+}
+
+/**
+ * 获取日程状态文本
+ */
+function getScheduleStatusText() {
+  const startTime = props.schedule.start_time
+  const endTime = props.schedule.end_time
+  
+  if (!startTime) return ''
+  
+  // 先判断是否已结束
+  if (isScheduleEnded(startTime, endTime)) {
+    return '已结束'
+  }
+  
+  // 再判断是否已开始但未结束
+  if (isPastSchedule(startTime)) {
+    return '进行中'
+  }
+  
+  // 还未开始
+  return ''
+}
+
+/**
+ * 根据状态返回对应的 CSS 类名
+ */
+function getStatusClass() {
+  const status = getScheduleStatusText()
+  if (status === '已结束') return 'status-ended'
+  if (status === '进行中') return 'status-ongoing'
+  return ''
 }
 
 function isExpiredDate(startTime) {
@@ -45,7 +105,9 @@ function isExpiredDate(startTime) {
 
 function formatTime(isoString) {
   if (!isoString) return ''
-  const date = new Date(isoString)
+  // 修复：确保带 Z 后缀，强制浏览器按 UTC 解析后再转为本地时间显示
+  const utcString = isoString.endsWith('Z') ? isoString : isoString + 'Z'
+  const date = new Date(utcString)
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
@@ -64,7 +126,10 @@ function getRecurringText(pattern) {
   <li class="schedule-item" :class="{ 'past-schedule': isPastSchedule(schedule.start_time) }">
     <!-- 时间显示 -->
     <div class="item-time">
-      {{ formatTime(schedule.start_time) }}
+      <span class="time-text">{{ formatTime(schedule.start_time) }}</span>
+      <span v-if="getScheduleStatusText()" class="status-badge" :class="getStatusClass()">
+        {{ getScheduleStatusText() }}
+      </span>
     </div>
     
     <!-- 内容区域 -->
@@ -119,6 +184,21 @@ function getRecurringText(pattern) {
     
     <!-- 操作按钮 -->
     <div class="item-actions">
+      <!-- 完成按钮（仅在未完成且未结束时显示） -->
+      <button 
+        v-if="!schedule.is_completed && !isScheduleEnded(schedule.start_time, schedule.end_time)"
+        class="action-btn action-btn-complete" 
+        @click="handleComplete" 
+        title="标记为已完成"
+      >
+        <Check :size="20"/>
+      </button>
+      
+      <!-- 已完成标记（已完成后显示） -->
+      <div v-if="schedule.is_completed" class="completed-badge" title="已完成">
+        <Check :size="18"/>
+      </div>
+      
       <button class="action-btn" @click="handleEdit" title="编辑">
         <Edit2 :size="20"/>
       </button>
@@ -157,6 +237,51 @@ function getRecurringText(pattern) {
   margin-right: 1.5rem;
   width: 70px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.time-text {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+/* 状态徽章样式 */
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: fadeIn 0.3s ease;
+}
+
+/* 进行中的状态 - 橙色 */
+.status-ongoing {
+  background-color: #fff3e0;
+  color: #f57c00;
+  border: 1px solid #ffb74d;
+}
+
+/* 已结束的状态 - 灰色 */
+.status-ended {
+  background-color: #f5f5f5;
+  color: #757575;
+  border: 1px solid #bdbdbd;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .item-content {
@@ -262,6 +387,44 @@ function getRecurringText(pattern) {
   color: white;
 }
 
+/* 完成按钮样式 */
+.action-btn-complete {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.action-btn-complete:hover {
+  background-color: #4caf50;
+  color: white;
+}
+
+/* 已完成标记徽章 */
+.completed-badge {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #4caf50;
+  color: white;
+  border-radius: 6px;
+  animation: completePulse 0.5s ease;
+}
+
+@keyframes completePulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 .recurring-badge {
   font-size: 0.75rem;
   background-color: #e3f2fd;
@@ -270,5 +433,25 @@ function getRecurringText(pattern) {
   border-radius: 12px;
   margin-right: 8px;
   font-weight: 600;
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  background-color: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+.status-ended {
+  background-color: #ffebee;
+  color: #c62828;
+}
+
+.status-ongoing {
+  background-color: #e8f5e9;
+  color: #2e7d32;
 }
 </style>
