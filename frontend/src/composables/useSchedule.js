@@ -52,7 +52,11 @@ export function useSchedule(userStore, API_URL) {
   async function fetchSchedules() {
     try {
       isLoading.value = true
-      const response = await axios.get(`${API_URL}/schedules`)
+      const response = await axios.get(`${API_URL}/schedules`, {
+        headers: { 
+          'Authorization': `Bearer ${userStore.token}` 
+        }
+      })
       
       // 按时间排序
       schedules.value = response.data.sort((a, b) => 
@@ -103,7 +107,11 @@ export function useSchedule(userStore, API_URL) {
       }
       
       console.log('创建日程 payload:', payload)
-      await axios.post(`${API_URL}/schedules`, payload)
+      await axios.post(`${API_URL}/schedules`, payload, {
+        headers: { 
+          'Authorization': `Bearer ${userStore.token}` 
+        }
+      })
       
       // 重置表单
       newSchedule.value = defaultScheduleForm()
@@ -142,7 +150,11 @@ export function useSchedule(userStore, API_URL) {
     }
     
     try {
-      await axios.delete(`${API_URL}/schedules/${id}`)
+      await axios.delete(`${API_URL}/schedules/${id}`, {
+        headers: { 
+          'Authorization': `Bearer ${userStore.token}` 
+        }
+      })
       await fetchSchedules()
       return true
     } catch (err) {
@@ -232,7 +244,11 @@ export function useSchedule(userStore, API_URL) {
       }
 
       console.log('更新日程 payload:', payload)
-      await axios.put(`${API_URL}/schedules/${editingSchedule.value.id}`, payload)
+      await axios.put(`${API_URL}/schedules/${editingSchedule.value.id}`, payload, {
+        headers: { 
+          'Authorization': `Bearer ${userStore.token}` 
+        }
+      })
       
       closeEditModal()
       await fetchSchedules()
@@ -252,7 +268,11 @@ export function useSchedule(userStore, API_URL) {
    */
   async function markScheduleComplete(id) {
     try {
-      await axios.patch(`${API_URL}/schedules/${id}/complete`)
+      await axios.patch(`${API_URL}/schedules/${id}/complete`, {}, {
+        headers: { 
+          'Authorization': `Bearer ${userStore.token}` 
+        }
+      })
       await fetchSchedules()
       return true
     } catch (err) {

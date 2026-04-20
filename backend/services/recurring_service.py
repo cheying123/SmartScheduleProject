@@ -68,28 +68,12 @@ class RecurringService:
                 schedule.start_time = next_start
                 schedule.end_time = next_end
                 
-                # 重新获取天气信息（如果在未来7天内）
-                from services.weather_service import get_weather_with_alerts
-                schedule_date = next_start.strftime('%Y-%m-%d')
-                today = datetime.now().strftime('%Y-%m-%d')
-                target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
-                today_date = datetime.strptime(today, '%Y-%m-%d')
-                days_diff = (target_date - today_date).days
-                
-                if 0 <= days_diff <= 7:
-                    city_location_id = schedule.user.location if schedule.user else "101010100"
-                    try:
-                        weather_result = get_weather_with_alerts(city_location_id, schedule_date)
-                        if weather_result:
-                            schedule.weather_info = weather_result['weather_text']
-                    except Exception as e:
-                        logger.error(f"更新天气失败: {e}")
+                # 重置完成状态，因为新周期应该是未完成的
+                schedule.is_completed = False
+                schedule.completed_at = None
 
                 updated_count += 1
-                logger.info(f"✅ 日程 '{schedule.title}' 已滚动至: {next_start}")
-        
-        if updated_count > 0:
-            db.session.commit()
-            logger.info(f"🎉 共更新了 {updated_count} 个重复日程")
-        
-        return updated_count
+                logger.info(f"📅 重复日程已更新: {schedule.id}, 下次开始时间: {next_start}, 结束时间: {next_end}")
+
+        logger.info(f"✅ 本次共更新了 {updated_count} 个重复日程")
+        db.session.commit()

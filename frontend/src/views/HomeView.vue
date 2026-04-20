@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart, Sparkles, Search, Filter, MessageSquare } from 'lucide-vue-next'
+import { PlusCircle, LogOut, Clock, Globe, Bell, AlertCircle, Calendar, Check, Sun, BarChart, Sparkles, Search, Filter, MessageSquare, Download, Upload } from 'lucide-vue-next'
 
 import axios from 'axios'
 import { useUserStore } from '../stores/user'
@@ -34,6 +34,8 @@ import FloatingActionButton from '@/components/common/FloatingActionButton.vue'
 import NotificationsCenter from '@/components/notifications/NotificationsCenter.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import LogoutConfirmDialog from '@/components/common/LogoutConfirmDialog.vue'
+import ScheduleExport from '@/components/schedule/ScheduleExport.vue'
+import ScheduleImport from '@/components/schedule/ScheduleImport.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -54,6 +56,10 @@ const isAutoScheduleModalVisible = ref(false)
 const autoScheduleTasksInput = ref('') // 格式示例：复习数学 60, 跑步 30
 const isAutoScheduling = ref(false)
 
+// 新增：导出/导入日程状态
+const isExportModalVisible = ref(false)
+const isImportModalVisible = ref(false)
+
 async function handleAutoSchedule(tasks) {
   if (!tasks || tasks.length === 0) return
   
@@ -70,7 +76,7 @@ async function handleAutoSchedule(tasks) {
         type: 'success',
         message: response.data.message + (response.data.unscheduled.length > 0 ? `\n未安排: ${response.data.unscheduled.join(', ')}` : '')
       })
-      fetchSchedules(API_URL) // 刷新日程列表
+      fetchSchedules() // 刷新日程列表
       if (statsPanel.value) statsPanel.value.fetchStats() // 刷新统计数据
       isAutoScheduleModalVisible.value = false
     }
@@ -633,6 +639,16 @@ function goToStatistics() {
   router.push('/statistics')
 }
 
+// 导出日程
+function openExportModal() {
+  isExportModalVisible.value = true
+}
+
+// 导入日程
+function openImportModal() {
+  isImportModalVisible.value = true
+}
+
 // 监听用户信息变化，更新标题
 watch(() => userStore.user, (newUser) => {
   if (newUser?.username) {
@@ -668,7 +684,7 @@ onMounted(async () => {
     document.title = `${userStore.user.username} - 我的日程`
   }
   
-  fetchSchedules(API_URL)
+  fetchSchedules()
   loadRecommendations()
 })
 
@@ -727,6 +743,24 @@ onUnmounted(() => {
           >
             <Sparkles :size="20" />
             <span>智能排程</span>
+          </button>
+          
+          <button 
+            v-if="activeTab === 'schedule'"
+            class="export-btn" 
+            @click="openExportModal"
+          >
+            <Download :size="20" />
+            <span>导出日程</span>
+          </button>
+          
+          <button 
+            v-if="activeTab === 'schedule'"
+            class="import-btn" 
+            @click="openImportModal"
+          >
+            <Upload :size="20" />
+            <span>导入日程</span>
           </button>
         </div>
       </header>
@@ -861,6 +895,23 @@ onUnmounted(() => {
       :is-visible="isLogoutModalVisible"
       @confirm="handleLogout"
       @cancel="isLogoutModalVisible = false"
+    />
+
+    <!-- 弹窗：导出日程 -->
+    <ScheduleExport
+      :visible="isExportModalVisible"
+      :API_URL="API_URL"
+      :token="userStore.token"
+      @close="isExportModalVisible = false"
+    />
+
+    <!-- 弹窗：导入日程 -->
+    <ScheduleImport
+      :visible="isImportModalVisible"
+      :API_URL="API_URL"
+      :token="userStore.token"
+      @close="isImportModalVisible = false"
+      @import-success="fetchSchedules"
     />
 
      <!-- 冲突解决对话框 -->
@@ -1187,6 +1238,100 @@ onUnmounted(() => {
 
 .auto-schedule-btn:hover svg {
   transform: rotate(15deg) scale(1.1);
+}
+
+/* 导出按钮 */
+.export-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 25px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.export-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: 0.5s;
+}
+
+.export-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.5);
+}
+
+.export-btn:hover::before {
+  left: 100%;
+}
+
+.export-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.export-btn:hover svg {
+  transform: scale(1.1);
+}
+
+/* 导入按钮 */
+.import-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 25px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.import-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: 0.5s;
+}
+
+.import-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.5);
+}
+
+.import-btn:hover::before {
+  left: 100%;
+}
+
+.import-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.import-btn:hover svg {
+  transform: scale(1.1);
 }
 
 .tab-content {
