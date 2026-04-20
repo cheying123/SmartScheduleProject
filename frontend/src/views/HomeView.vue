@@ -27,6 +27,13 @@ import ProfileForm from '@/components/profile/ProfileForm.vue'
 import NotificationList from '@/components/common/NotificationList.vue'
 import ConflictDialog from '@/components/schedule/ConflictDialog.vue'
 import DashboardStats from '@/components/analytics/DashboardStats.vue'
+// 新增组件导入
+import DailyBriefing from '@/components/dashboard/DailyBriefing.vue'
+import AutoScheduleModal from '@/components/schedule/AutoScheduleModal.vue'
+import FloatingActionButton from '@/components/common/FloatingActionButton.vue'
+import NotificationsCenter from '@/components/notifications/NotificationsCenter.vue'
+import SettingsPanel from '@/components/settings/SettingsPanel.vue'
+import LogoutConfirmDialog from '@/components/common/LogoutConfirmDialog.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -47,19 +54,11 @@ const isAutoScheduleModalVisible = ref(false)
 const autoScheduleTasksInput = ref('') // 格式示例：复习数学 60, 跑步 30
 const isAutoScheduling = ref(false)
 
-async function handleAutoSchedule() {
-  if (!autoScheduleTasksInput.value.trim()) return
+async function handleAutoSchedule(tasks) {
+  if (!tasks || tasks.length === 0) return
   
   try {
     isAutoScheduling.value = true
-    
-    // 解析输入字符串为任务数组
-    const tasks = autoScheduleTasksInput.value.split(/[,\n]/).map(item => {
-      const parts = item.trim().split(/\s+/)
-      const duration = parseInt(parts.pop()) || 30 // 默认30分钟
-      const title = parts.join(' ')
-      return { title, duration_minutes: duration }
-    }).filter(t => t.title)
     
     const response = await axios.post(`${API_URL}/analytics/auto-schedule`, 
       { tasks, days: 3 },
@@ -74,7 +73,6 @@ async function handleAutoSchedule() {
       fetchSchedules(API_URL) // 刷新日程列表
       if (statsPanel.value) statsPanel.value.fetchStats() // 刷新统计数据
       isAutoScheduleModalVisible.value = false
-      autoScheduleTasksInput.value = ''
     }
   } catch (err) {
     showNotification({ type: 'error', message: '智能排程失败，请稍后再试' })
@@ -414,7 +412,7 @@ function getNotificationColor(type) {
     'weather': '#0ea5e9',
     'time_preference': '#10b981',
     'balance': '#8b5cf6',
-    'info': '#64748b'
+    'info': '#667eea'
   }
   return colors[type] || '#667eea'
 }
@@ -736,49 +734,13 @@ onUnmounted(() => {
       <!-- 日程页面 -->
       <div v-if="activeTab === 'schedule'" class="tab-content">
         <!-- ✅ 优化：每日智能摘要卡片 (Modern UI) -->
-        <div v-if="dailyBriefing && dailyBriefing.message" class="briefing-card-modern">
-          <div class="briefing-icon-wrapper">
-            <MessageSquare :size="24" color="#667eea" />
-          </div>
-          <div class="briefing-body">
-            <div class="briefing-header-row">
-              <h3>🌤️ 今日智能提醒</h3>
-              <button 
-                v-if="dailyBriefing.ai_advice" 
-                class="speak-btn-mini" 
-                @click="handleSpeak(dailyBriefing.ai_advice)"
-                title="语音播报"
-              >
-                🔊
-              </button>
-            </div>
-            
-            <p class="briefing-text">
-              {{ dailyBriefing.ai_advice || dailyBriefing.message || '暂无今日建议' }}
-            </p>
-            
-            <div class="briefing-meta">
-              <span class="meta-item">
-                <Calendar :size="14" /> 
-                {{ dailyBriefing.schedule_count || 0 }} 个日程
-              </span>
-              
-              <span v-if="dailyBriefing.weather && dailyBriefing.weather.text !== '未知'" class="meta-item weather-item">
-                <Sun :size="14" /> 
-                {{ dailyBriefing.weather.text }} {{ dailyBriefing.weather.temperature }}°C
-              </span>
-
-              <button 
-                class="refresh-briefing" 
-                @click="fetchDailyBriefing" 
-                :disabled="isBriefingLoading"
-              >
-                <Sparkles :size="14" /> 
-                {{ isBriefingLoading ? '生成中...' : '刷新建议' }}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DailyBriefing
+          :dailyBriefing="dailyBriefing"
+          :isBriefingLoading="isBriefingLoading"
+          :API_URL="API_URL"
+          :token="userStore.token"
+          @refresh-briefing="fetchDailyBriefing"
+        />
         
         <!-- 统计面板 -->
         <DashboardStats 
@@ -815,189 +777,21 @@ onUnmounted(() => {
 
       <!-- 通知页面（带倒计时提醒） -->
       <div v-if="activeTab === 'notifications'" class="tab-content">
-        <div class="notifications-panel">
-          <!-- 头部统计 -->
-          <div class="notifications-header">
-            <div class="header-title">
-              <Bell :size="24" class="bell-icon" />
-              <h3>智能通知中心</h3>
-            </div>
-            
-            <!-- 统计徽章 -->
-            <div v-if="recommendations && recommendations.length > 0" class="stats-badges">
-              <span v-if="urgentCount > 0" class="stat-badge urgent">
-                <AlertCircle :size="14" />
-                {{ urgentCount }} 紧急
-              </span>
-              <span v-if="scheduleReminderCount > 0" class="stat-badge schedule">
-                <Clock :size="14" />
-                {{ scheduleReminderCount }} 日程
-              </span>
-              <span class="stat-badge total">
-                共 {{ recommendations.length }} 条
-              </span>
-            </div>
-          </div>
-
-          <!-- 工具栏 -->
-          <div class="notifications-toolbar">
-            <button class="btn-refresh" @click="loadRecommendations">
-              <Check :size="16" />
-              <span>刷新推荐</span>
-            </button>
-            
-            <div class="filter-group">
-              <Filter :size="16" class="filter-icon" />
-              <select v-model="notificationFilter" class="filter-select">
-                <option value="all">全部类型</option>
-                <option value="schedule_reminder">日程提醒</option>
-                <option value="weather">天气提示</option>
-                <option value="time_preference">时间偏好</option>
-                <option value="balance">平衡建议</option>
-                <option value="info">提示信息</option>
-              </select>
-            </div>
-          </div>
-          
-          <!-- 空状态 -->
-          <div v-if="!filteredRecommendations || filteredRecommendations.length === 0" class="empty-notifications">
-            <div class="empty-icon">
-              <Bell :size="80" />
-            </div>
-            <h3>{{ notificationFilter === 'all' ? '暂无新消息' : '该类型暂无通知' }}</h3>
-            <p>{{ notificationFilter === 'all' ? '点击"刷新推荐"获取智能建议' : '尝试切换其他类型查看' }}</p>
-            <button v-if="notificationFilter !== 'all'" class="btn-clear-filter" @click="notificationFilter = 'all'">
-              查看全部
-            </button>
-          </div>
-          
-          <!-- 通知列表 -->
-          <div v-else class="notifications-list">
-            <!-- 按类型分组显示 -->
-            <div 
-              v-for="(items, type) in groupedNotifications" 
-              :key="type"
-              class="notification-group"
-            >
-              <!-- 类型标题 -->
-              <div class="group-header">
-                <component 
-                  :is="getNotificationIcon(type)" 
-                  :size="18" 
-                  class="group-icon"
-                  :style="{ color: getNotificationColor(type) }"
-                />
-                <span class="group-title">{{ getNotificationTitle(type) }}</span>
-                <span class="group-count">{{ items.length }}</span>
-              </div>
-
-              <!-- 该类型的通知列表 -->
-              <div class="group-items">
-                <div 
-                  v-for="(rec, index) in items" 
-                  :key="rec.id || index"
-                  class="notification-item"
-                  :class="[
-                    rec.type === 'schedule_reminder' ? 'type-schedule-reminder' : ('type-' + rec.type),
-                    getReminderStyle(rec.priority)
-                  ]"
-                >
-                  <div class="notification-icon">
-                    <component 
-                      v-if="rec.type === 'schedule_reminder'"
-                      :is="getReminderIcon(rec.priority)" 
-                      :size="24"
-                    />
-                    <Sun v-else-if="rec.type === 'weather'" :size="24" />
-                    <Check v-else-if="rec.type === 'time_preference'" :size="24" />
-                    <Globe v-else :size="24" />
-                  </div>
-                  <div class="notification-content">
-                    <h4>
-                      {{ rec.type === 'schedule_reminder' ? '⏰ 日程提醒' : getNotificationTitle(rec.type) }}
-                    </h4>
-                    <p>{{ rec.message }}</p>
-                    
-                    <!-- 倒计时详情（仅日程提醒显示） -->
-                    <div v-if="rec.type === 'schedule_reminder' && rec.countdown" class="countdown-details">
-                      <div class="countdown-time-display">
-                        <Clock :size="14" />
-                        <span class="time-text">{{ rec.countdown.remaining_text }}</span>
-                        <span class="relative-time">{{ formatRelativeTime(rec.start_time) }}</span>
-                      </div>
-                      
-                      <!-- 进度条（可视化剩余时间） -->
-                      <div class="countdown-progress">
-                        <div 
-                          class="progress-bar"
-                          :style="{ width: getProgressWidth(rec.countdown) }"
-                        ></div>
-                      </div>
-                      
-                      <!-- 快速操作按钮 -->
-                      <div class="quick-actions">
-                        <button 
-                          class="view-schedule-btn"
-                          @click="navigateToSchedule(rec.schedule_id)"
-                        >
-                          <Calendar :size="14" />
-                          <span>查看日程</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <NotificationsCenter
+          :recommendations="recommendations"
+          :API_URL="API_URL"
+          :token="userStore.token"
+          @navigate-to-schedule="navigateToSchedule"
+          @load-recommendations="loadRecommendations"
+        />
       </div>
 
       <!-- 设置页面 -->
       <div v-if="activeTab === 'settings'" class="tab-content">
-        <div class="settings-panel">
-          <h3>偏好设置</h3>
-          
-          <div class="setting-item">
-            <div class="setting-label">
-              <Clock :size="20" />
-              <span>时区显示</span>
-            </div>
-            <div class="setting-value">
-              {{ currentTimezone }}
-            </div>
-          </div>
-          
-          <div class="setting-item">
-            <div class="setting-label">
-              <Globe :size="20" />
-              <span>默认城市</span>
-            </div>
-            <div class="setting-value">
-              {{ userStore.user?.location_name || '北京 (101010100)' }}
-            </div>
-          </div>
-          
-          <div class="setting-item">
-            <div class="setting-label">
-              <Bell :size="20" />
-              <span>天气提醒</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="userStore.user?.weather_alerts_enabled !== false" disabled>
-              <span class="slider"></span>
-            </label>
-          </div>
-          
-          <div class="setting-section">
-            <h4>关于</h4>
-            <p class="about-text">
-              基于多模态交互的个性化智能日程管理助手<br>
-              版本：v1.0.0<br>
-              技术栈：Vue 3 + Flask + MySQL
-            </p>
-          </div>
-        </div>
+        <SettingsPanel
+          :user="userStore.user"
+          :currentTimezone="currentTimezone"
+        />
       </div>
     </main>
 
@@ -1063,21 +857,11 @@ onUnmounted(() => {
     </transition>
 
     <!-- 弹窗：退出确认 -->
-    <transition name="fade">
-      <div v-if="isLogoutModalVisible" class="form-overlay" @click.self="isLogoutModalVisible = false">
-        <div class="form-container logout-confirm">
-          <h2>确认退出</h2>
-          <p>确定要退出登录吗？</p>
-          <div class="form-actions">
-            <button type="button" class="btn-cancel" @click="isLogoutModalVisible = false">取消</button>
-            <button type="button" class="btn-submit btn-logout" @click="handleLogout">
-              <LogOut :size="16" style="vertical-align: middle; margin-right: 4px;" />
-              退出登录
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
+    <LogoutConfirmDialog
+      :is-visible="isLogoutModalVisible"
+      @confirm="handleLogout"
+      @cancel="isLogoutModalVisible = false"
+    />
 
      <!-- 冲突解决对话框 -->
     <transition name="fade">
@@ -1091,65 +875,27 @@ onUnmounted(() => {
     </transition>
 
     <!-- 弹窗：智能排程助手 -->
-    <transition name="fade">
-      <div v-if="isAutoScheduleModalVisible" class="form-overlay" @click.self="isAutoScheduleModalVisible = false">
-        <div class="form-container auto-schedule-modal">
-          <div class="modal-header">
-            <Sparkles :size="24" color="#667eea" />
-            <h2>✨ 智能一键排程</h2>
-          </div>
-          <div class="modal-body">
-            <p class="modal-desc">请输入待办事项，格式：<strong>任务名称 时长(分钟)</strong>，多个任务用逗号或换行分隔。</p>
-            <textarea 
-              v-model="autoScheduleTasksInput" 
-              placeholder="例如：&#10;复习数学 60&#10;跑步 30&#10;阅读英语 45"
-              class="auto-schedule-textarea"
-            ></textarea>
-            <div class="schedule-preview-hint">
-              💡 系统将根据您的空闲时间自动安排在未来 3 天内。
-            </div>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="btn-cancel" @click="isAutoScheduleModalVisible = false">取消</button>
-            <button 
-              type="button" 
-              class="btn-submit btn-auto-schedule" 
-              @click="handleAutoSchedule"
-              :disabled="isAutoScheduling || !autoScheduleTasksInput.trim()"
-            >
-              <Sparkles :size="16" />
-              {{ isAutoScheduling ? '正在排程...' : '开始智能排程' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
+    <AutoScheduleModal
+      :is-visible="isAutoScheduleModalVisible"
+      :is-processing="isAutoScheduling"
+      :API_URL="API_URL"
+      :token="userStore.token"
+      @close="isAutoScheduleModalVisible = false"
+      @submit="handleAutoSchedule"
+    />
     
     <!-- FAB 快速添加按钮 -->
-    <div class="fab-container">
-      <!-- 展开菜单 -->
-      <div v-if="showFabMenu" class="fab-menu">
-        <button class="fab-menu-item" @click="openNaturalLanguageMode">
-          <span class="menu-icon">🎤</span>
-          <span>语音输入</span>
-        </button>
-        <button class="fab-menu-item" @click="openManualForm">
-          <span class="menu-icon">📝</span>
-          <span>手动创建</span>
-        </button>
-        <button class="fab-menu-item" @click="openAutoScheduleModal">
-          <span class="menu-icon">🤖</span>
-          <span>智能排程</span>
-        </button>
-      </div>
-      
-      <!-- 主按钮 -->
-      <button class="fab-main-btn" @click="toggleFabMenu" title="快速添加">
-        <PlusCircle :size="28" />
-      </button>
-    </div>
+    <FloatingActionButton
+      :show-menu="showFabMenu"
+      @toggle-menu="toggleFabMenu"
+      @voice-input="openNaturalLanguageMode"
+      @manual-input="openManualForm"
+      @auto-schedule="openAutoScheduleModal"
+    />
   </div>
 </template>
+
+
 
 <style scoped>
 /* ✅ 优化：现代简报卡片样式 */
@@ -1447,438 +1193,6 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 2rem;
-}
-
-/* ===== 通知面板样式 ===== */
-.notifications-panel {
-  background: white;
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
-  min-height: 500px;
-  display: flex;
-  flex-direction: column;
-}
-
-.notifications-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  color: #32325D;
-}
-
-.bell-icon {
-  color: #5E72E4;
-}
-
-.header-title h3 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.stats-badges {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.stat-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.stat-badge.urgent {
-  background-color: #fee2e2;
-  color: #dc2626;
-}
-
-.stat-badge.schedule {
-  background-color: #dbeafe;
-  color: #2563eb;
-}
-
-.stat-badge.total {
-  background-color: #f3f4f6;
-  color: #4b5563;
-}
-
-.notifications-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-
-.btn-refresh {
-  background-color: #5E72E4;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 0.6rem 1.2rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  transition: all 0.2s;
-}
-
-.btn-refresh:hover {
-  background-color: #4c5fd5;
-  transform: translateY(-1px);
-}
-
-.filter-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background-color: #f8f9fe;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.filter-icon {
-  color: #8898aa;
-}
-
-.filter-select {
-  border: none;
-  background: transparent;
-  font-size: 0.9rem;
-  color: #32325D;
-  outline: none;
-  cursor: pointer;
-  min-width: 120px;
-}
-
-.empty-notifications {
-  text-align: center;
-  padding: 4rem 2rem;
-  color: #adb5bd;
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-.empty-icon {
-  margin-bottom: 1.5rem;
-  opacity: 0.5;
-}
-
-.empty-notifications h3 {
-  margin: 0 0 0.5rem 0;
-  color: #32325D;
-  font-size: 1.2rem;
-}
-
-.empty-notifications p {
-  color: #8898aa;
-  margin-bottom: 1.5rem;
-}
-
-.btn-clear-filter {
-  background-color: transparent;
-  border: 1px solid #5E72E4;
-  color: #5E72E4;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-clear-filter:hover {
-  background-color: #5E72E4;
-  color: white;
-}
-
-.notifications-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.notification-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px dashed #e9ecef;
-}
-
-.group-icon {
-  opacity: 0.8;
-}
-
-.group-title {
-  font-weight: 600;
-  color: #32325D;
-  font-size: 0.95rem;
-}
-
-.group-count {
-  background-color: #e9ecef;
-  color: #525F7F;
-  font-size: 0.75rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 10px;
-  margin-left: auto;
-}
-
-.group-items {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.notification-item {
-  display: flex;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-radius: 8px;
-  border-left-width: 6px;
-  border-left-style: solid;
-  background-color: #f8f9fa;
-  transition: all 0.3s ease;
-}
-
-.notification-item:hover {
-  transform: translateX(5px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.notification-icon {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background-color: rgba(94, 114, 228, 0.1);
-  color: #5E72E4;
-}
-
-.notification-content {
-  flex-grow: 1;
-}
-
-.notification-content h4 {
-  margin: 0 0 0.5rem 0;
-  color: #32325D;
-  font-size: 1.1rem;
-}
-
-.notification-content p {
-  margin: 0;
-  color: #525F7F;
-  line-height: 1.6;
-}
-
-/* 日程提醒特殊样式 */
-.notification-item.type-schedule-reminder {
-  animation: none;
-}
-
-/* 不同优先级的样式 */
-.reminder-urgent {
-  background-color: #ffebee;
-  border-left-color: #f44336;
-  animation: pulse-border 2s infinite;
-}
-
-.reminder-high {
-  background-color: #fff3e0;
-  border-left-color: #ff9800;
-}
-
-.reminder-medium {
-  background-color: #fff9c4;
-  border-left-color: #ffc107;
-}
-
-.reminder-low {
-  background-color: #e3f2fd;
-  border-left-color: #2196F3;
-}
-
-@keyframes pulse-border {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
-  }
-}
-
-/* 倒计时详情区域 */
-.countdown-details {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.countdown-time-display {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: #525F7F;
-  margin-bottom: 0.5rem;
-}
-
-.countdown-time-display svg {
-  color: #5E72E4;
-}
-
-.time-text {
-  font-weight: 600;
-  color: #32325D;
-}
-
-.relative-time {
-  font-size: 0.85em;
-  color: #8898aa;
-  margin-left: auto;
-}
-
-/* 进度条 */
-.countdown-progress {
-  width: 100%;
-  height: 6px;
-  background-color: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
-  overflow: hidden;
-  margin-bottom: 0.75rem;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #5E72E4 0%, #825EE4 100%);
-  border-radius: 3px;
-  transition: width 1s ease;
-}
-
-.reminder-urgent .progress-bar {
-  background: linear-gradient(90deg, #f44336 0%, #ff6659 100%);
-}
-
-.reminder-high .progress-bar {
-  background: linear-gradient(90deg, #ff9800 0%, #ffb74d 100%);
-}
-
-.reminder-medium .progress-bar {
-  background: linear-gradient(90deg, #ffc107 0%, #ffd54f 100%);
-}
-
-.progress-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  right: 0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  animation: progress-shine 2s infinite;
-}
-
-@keyframes progress-shine {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(100%); }
-}
-
-/* 快速操作按钮 */
-.quick-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.view-schedule-btn {
-  padding: 0.4rem 0.8rem;
-  font-size: 0.85rem;
-  background-color: rgba(94, 114, 228, 0.1);
-  color: #5E72E4;
-  border: 1px solid rgba(94, 114, 228, 0.3);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.view-schedule-btn:hover {
-  background-color: #5E72E4;
-  color: white;
-}
-
-/* ===== 设置面板样式 ===== */
-.settings-panel {
-  background: white;
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.settings-panel h3 {
-  margin: 0 0 1.5rem 0;
-  color: #32325D;
-  font-size: 1.2rem;
-}
-
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 0;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.setting-label {
-  color: #32325D;
-  font-weight: 500;
-}
-
-.setting-value {
-  color: #8898aa;
-  font-size: 0.9rem;
-}
-
-.setting-section {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 2px solid #e9ecef;
-}
-
-.setting-section h4 {
-  margin: 0 0 1rem 0;
-  color: #32325D;
-  font-size: 1rem;
-}
-
-.about-text {
-  color: #8898aa;
-  font-size: 0.9rem;
-  line-height: 1.8;
 }
 
 /* ===== 通用弹窗样式 ===== */
@@ -2182,56 +1496,6 @@ onUnmounted(() => {
 .replay-btn:hover {
   background-color: #5E72E4;
   color: white;
-}
-
-/* ===== 通知面板响应式样式 ===== */
-@media (max-width: 768px) {
-  .notifications-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-
-  .stats-badges {
-    width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .notifications-toolbar {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .btn-refresh {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .filter-group {
-    width: 100%;
-  }
-
-  .filter-select {
-    flex: 1;
-  }
-
-  .notification-item {
-    flex-direction: column;
-  }
-
-  .notification-icon {
-    align-self: flex-start;
-  }
-
-  .quick-actions {
-    margin-top: 0.75rem;
-  }
-
-  .view-schedule-btn {
-    width: 100%;
-    justify-content: center;
-  }
 }
 
 /* ===== 铃铛动画优化 ===== */
