@@ -5,15 +5,19 @@
 
 import { ref, onUnmounted } from 'vue'
 import axios from 'axios'
-import { VOICE_RECOGNITION, GEOLOCATION_OPTIONS } from '@/constants'
-import { formatRecordingTime } from '@/utils/timeUtils'
+import { useUserStore } from '@/stores/user'
+// import { VOICE_RECOGNITION, GEOLOCATION_OPTIONS } from '@/constants' // Removed unused imports if not needed elsewhere, but keeping structure clean
+// import { formatRecordingTime } from '@/utils/timeUtils'
 
 /**
  * 自然语言输入组合式函数
  * @param {string} API_URL - API 基础地址
+ * @param {Function} fetchSchedules - 刷新日程列表的方法
  * @returns {Object} 自然语言输入相关的方法和状态
  */
 export function useNaturalLanguage(API_URL, fetchSchedules) {
+  const userStore = useUserStore()
+  
   // 状态
   const isNaturalLanguageMode = ref(false)
   const naturalLanguageInput = ref('')
@@ -24,226 +28,11 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
   // 录音状态
   const isRecording = ref(false)
   const recordingDuration = ref(0)
-  const recordingTimer = ref(null)
-
-  /**
-   * 解析自然语言并预填表单（不创建）
-   * @param {number} timezoneOffset - 时区偏移量（分钟）
-   * @returns {Promise<Object>} 解析结果
-   */
-  async function parseNaturalLanguage(timezoneOffset) {
-    if (!naturalLanguageInput.value.trim()) {
-      alert('请输入指令内容')
-      return null
-    }
-    
-    isAIProcessing.value = true
-    
-    try {
-      const response = await axios.post(`${API_URL}/schedules/nlp-parse`, {
-        text: naturalLanguageInput.value,
-        timezone_offset: timezoneOffset
-      })
-      
-      // 返回解析后的数据，供父组件填充表单
-      return {
-        success: true,
-        data: response.data
-      }
-    } catch (error) {
-      const errorMsg = error.response?.data?.error || error.message || '解析失败，请重试'
-      alert(`❌ 错误：${errorMsg}`)
-      console.error(error)
-      return { 
-        success: false, 
-        error: errorMsg 
-      }
-    } finally {
-      isAIProcessing.value = false
-    }
-  }
-
-  /**
-   * 处理自然语言提交
-   * @param {number} timezoneOffset - 时区偏移量（分钟）
-   * @returns {Promise<Object>} 处理结果
-   */
-  async function handleNaturalLanguageSubmit(timezoneOffset) {
-    if (!naturalLanguageInput.value.trim()) {
-      alert('请输入指令内容')
-      return { success: false, error: 'empty_input' }
-    }
-    
-    isProcessingNL.value = true
-    
-    try {
-      const response = await axios.post(`${API_URL}/schedules/natural-language`, {
-        text: naturalLanguageInput.value,
-        timezone_offset: timezoneOffset
-      })
-      
-      naturalLanguageInput.value = ''
-      isNaturalLanguageMode.value = false
-      
-      // 刷新日程列表（和传统表单创建使用同样的方法）
-      if (fetchSchedules) {
-        await fetchSchedules()
-      }
-      
-      if (response.data.ai_parsed) {
-        alert(`✨ AI 智能解析成功！日程已创建：${response.data.schedule.title}`)
-      } else {
-        alert(`日程已创建：${response.data.schedule.title}`)
-      }
-      
-      return { success: true, data: response.data }
-    } catch (error) {
-      if (error.response?.status === 409) {
-        const conflictData = error.response.data
-        
-        // 存储冲突数据，由父组件显示对话框
-        conflictDialog.value = conflictData
-        
-        // 重置处理状态
-        isProcessingNL.value = false
-        
-        return { 
-          success: false, 
-          type: 'conflict', 
-          data: conflictData 
-        }
-      } else {
-        // 其他错误也要重置状态
-        isProcessingNL.value = false
-        
-        const errorMsg = error.response?.data?.error || error.message || '解析失败，请重试'
-        alert(`❌ 错误：${errorMsg}`)
-        console.error(error)
-        return { success: false, type: 'error', error }
-      }
-    } finally {
-      // 确保在 try-catch 之外也重置（成功的情况）
-      if (isProcessingNL.value) {
-        isProcessingNL.value = false
-      }
-    }
-  }
-
-  /**
-   * 启动语音输入
-   * @returns {SpeechRecognition|null} 语音识别实例
-   */
-  function startVoiceInput() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('您的浏览器不支持语音识别，请使用 Chrome、Edge 或其他基于 Chromium 的浏览器')
-      return null
-    }
-    
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    const recognition = new SpeechRecognition()
-    
-    recognition.lang = VOICE_RECOGNITION.LANG
-    recognition.continuous = VOICE_RECOGNITION.CONTINUOUS
-    recognition.interimResults = VOICE_RECOGNITION.INTERIM_RESULTS
-    recognition.maxAlternatives = VOICE_RECOGNITION.MAX_ALTERNATIVES
-    
-    recognition.onstart = () => {
-      console.log('语音识别已启动')
-      isRecording.value = true
-      recordingDuration.value = 0
-      
-      if (recordingTimer.value) {
-        clearInterval(recordingTimer.value)
-      }
-      
-      recordingTimer.value = setInterval(() => {
-        recordingDuration.value++
-      }, 1000)
-    }
-    
-    recognition.onend = () => {
-      console.log('语音识别已结束')
-      isRecording.value = false
-      
-      if (recordingTimer.value) {
-        clearInterval(recordingTimer.value)
-        recordingTimer.value = null
-      }
-    }
-    
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript
-      naturalLanguageInput.value = transcript
-      console.log('识别结果:', transcript)
-    }
-    
-    recognition.onerror = (event) => {
-      console.error('语音识别错误:', event.error)
-      
-      let errorMessage = ''
-      switch(event.error) {
-        case 'no-speech':
-          errorMessage = '未检测到语音，请对着麦克风说话'
-          break
-        case 'audio-capture':
-          errorMessage = '无法访问麦克风，请检查权限设置'
-          break
-        case 'not-allowed':
-          errorMessage = '麦克风权限被拒绝，请在浏览器设置中允许麦克风权限'
-          break
-        case 'network':
-          errorMessage = '网络错误，请检查网络连接后重试'
-          break
-        case 'aborted':
-          errorMessage = '语音识别已取消'
-          break
-        default:
-          errorMessage = '语音识别失败：' + event.error
-      }
-      
-      alert(errorMessage)
-      stopRecording()
-    }
-    
-    try {
-      recognition.start()
-      return recognition
-    } catch (error) {
-      console.error('启动语音识别失败:', error)
-      alert('无法启动语音识别，请确保麦克风权限已允许')
-      isRecording.value = false
-      stopRecording()
-      return null
-    }
-  }
-
-  /**
-   * 停止录音
-   */
-  function stopRecording() {
-    isRecording.value = false
-    if (recordingTimer.value) {
-      clearInterval(recordingTimer.value)
-      recordingTimer.value = null
-    }
-    recordingDuration.value = 0
-  }
-
-  /**
-   * 取消操作
-   */
-  function handleCancelClick() {
-    if (isRecording.value) {
-      stopRecording()
-    }
-    isNaturalLanguageMode.value = false
-    naturalLanguageInput.value = ''
-  }
-
+  const recordingInterval = ref(null)
 
   /**
    * 语音合成工具函数 (Text-to-Speech)
-   * 实现任务书中的“多模态反馈”
+   * 实现任务书中的"多模态反馈"
    */
   function speak(text, priority = false) {
     if ('speechSynthesis' in window) {
@@ -257,48 +46,216 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
       
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = 'zh-CN'
-      utterance.rate = 1.1 // 稍微快一点，更像助手
-      utterance.pitch = 1.0
+      utterance.rate = 1.0 // 语速
+      utterance.pitch = 1.0 // 音调
       window.speechSynthesis.speak(utterance)
     }
   }
 
   /**
-   * 简单的音效反馈 (Web Audio API)
+   * 解析自然语言并创建日程
+   * @param {number} timezoneOffset - 时区偏移量（分钟）
+   * @returns {Promise<Object>} - 创建的日程对象
    */
-  function playSound(type = 'success') {
+  async function parseAndCreate(timezoneOffset) {
+    if (!naturalLanguageInput.value || !naturalLanguageInput.value.trim()) {
+      speak('请输入内容', true)
+      return { success: false, error: '请输入内容' }
+    }
+
+    isProcessingNL.value = true
+    isAIProcessing.value = true
+    
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-      const oscillator = audioCtx.createOscillator()
-      const gainNode = audioCtx.createGain()
+      const response = await axios.post(
+        `${API_URL}/schedules/nlp-parse`,
+        { 
+          text: naturalLanguageInput.value,
+          timezone_offset: timezoneOffset
+        },
+        { 
+          headers: { 
+            'Authorization': `Bearer ${userStore.token}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      )
       
-      oscillator.connect(gainNode)
-      gainNode.connect(audioCtx.destination)
+      const scheduleData = response.data
       
-      if (type === 'success') {
-        oscillator.type = 'sine'
-        oscillator.frequency.setValueAtTime(500, audioCtx.currentTime)
-        oscillator.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.1)
-      } else if (type === 'error') {
-        oscillator.type = 'sawtooth'
-        oscillator.frequency.setValueAtTime(200, audioCtx.currentTime)
-        oscillator.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.2)
+      // 成功反馈：语音 + 视觉
+      const timeStr = new Date(scheduleData.start_time).toLocaleString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+      speak(`好的，已为您安排${scheduleData.title}，时间是${timeStr}`)
+      
+      // 清空输入框
+      naturalLanguageInput.value = ''
+      
+      // 刷新日程列表
+      if (fetchSchedules) {
+        await fetchSchedules()
       }
       
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime)
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3)
+      return { success: true, data: scheduleData }
+    } catch (err) {
+      console.error('NLP 解析失败:', err)
+      const errMsg = err.response?.data?.error || '智能解析失败，请尝试手动输入'
       
-      oscillator.start()
-      oscillator.stop(audioCtx.currentTime + 0.3)
-    } catch (e) {
-      console.error('音效播放失败', e)
+      // 错误反馈：语音提示
+      speak('抱歉，我没听懂，请您再说清楚一点')
+      
+      return { success: false, error: errMsg }
+    } finally {
+      isProcessingNL.value = false
+      isAIProcessing.value = false
     }
   }
 
+  /**
+   * 通过自然语言查询日程
+   * @param {string} queryText - 查询文本
+   * @param {number} timezoneOffset - 时区偏移量（分钟）
+   * @returns {Promise<Object>} - 查询结果
+   */
+  async function queryExistingSchedules(queryText, timezoneOffset) {
+    if (!queryText || !queryText.trim()) {
+      speak('请输入查询内容', true)
+      return { success: false, error: '请输入查询内容' }
+    }
+
+    isAIProcessing.value = true
+    
+    try {
+      const response = await axios.post(
+        `${API_URL}/schedules/query`,
+        { 
+          query: queryText,
+          timezone_offset: timezoneOffset
+        },
+        { 
+          headers: { 
+            'Authorization': `Bearer ${userStore.token}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      )
+      
+      if (response.data.success) {
+        const result = response.data.data
+        speak(result.response)
+        return { success: true, data: result }
+      } else {
+        const errMsg = response.data.error || '查询失败'
+        speak('查询失败，请重试')
+        return { success: false, error: errMsg }
+      }
+    } catch (err) {
+      console.error('查询日程失败:', err)
+      const errMsg = err.response?.data?.error || '查询失败，请稍后重试'
+      speak('查询失败，请稍后重试')
+      return { success: false, error: errMsg }
+    } finally {
+      isAIProcessing.value = false
+    }
+  }
+
+  /**
+   * 启动语音输入
+   */
+  function startVoiceInput() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      speak('您的浏览器不支持语音识别', true)
+      return
+    }
+    
+    isRecording.value = true
+    recordingDuration.value = 0
+    
+    // 开始计时
+    recordingInterval.value = setInterval(() => {
+      recordingDuration.value += 1
+    }, 1000)
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    const recognition = new SpeechRecognition()
+    
+    recognition.lang = 'zh-CN'
+    recognition.continuous = false
+    recognition.interimResults = false
+    
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript
+      naturalLanguageInput.value = transcript
+      
+      // 停止录音
+      stopRecording()
+    }
+    
+    recognition.onerror = (event) => {
+      console.error('语音识别错误:', event.error)
+      speak('语音识别失败，请重试')
+      stopRecording()
+    }
+    
+    recognition.onend = () => {
+       isRecording.value = false
+       if (recordingInterval.value) {
+         clearInterval(recordingInterval.value)
+         recordingInterval.value = null
+       }
+    }
+
+    try {
+      recognition.start()
+    } catch (error) {
+      console.error('启动语音识别失败:', error)
+      speak('无法启动语音识别')
+      stopRecording()
+    }
+  }
+
+  /**
+   * 停止语音输入
+   */
+  function stopRecording() {
+    isRecording.value = false
+    if (recordingInterval.value) {
+      clearInterval(recordingInterval.value)
+      recordingInterval.value = null
+    }
+    recordingDuration.value = 0
+  }
+
+  /**
+   * 取消自然语言输入
+   */
+  function handleCancelClick() {
+    if (isRecording.value) {
+      stopRecording()
+    }
+    naturalLanguageInput.value = ''
+    isNaturalLanguageMode.value = false
+  }
+
+  /**
+   * 简单的指令识别（用于区分是"查询"还是"创建"）
+   * @param {string} text 
+   * @returns {boolean} - 是否为查询指令
+   */
+  function isQueryIntent(text) {
+    if (!text) return false;
+    const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月'];
+    return queryKeywords.some(keyword => text.includes(keyword));
+  }
+
   onUnmounted(() => {
-    if (recordingTimer.value) {
-      clearInterval(recordingTimer.value)
-      recordingTimer.value = null
+    if (recordingInterval.value) {
+      clearInterval(recordingInterval.value)
+      recordingInterval.value = null
     }
   })
 
@@ -310,11 +267,12 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     conflictDialog,
     isRecording,
     recordingDuration,
-    parseNaturalLanguage,
-    handleNaturalLanguageSubmit,
+    parseAndCreate, // Replaced parseNaturalLanguage/handleNaturalLanguageSubmit with unified parseAndCreate for creation
+    queryExistingSchedules,
     startVoiceInput,
     stopRecording,
     handleCancelClick,
-    formatRecordingTime
+    isQueryIntent,
+    speak
   }
 }

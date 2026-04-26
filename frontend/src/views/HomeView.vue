@@ -102,6 +102,13 @@ function toggleFabMenu() {
 function openNaturalLanguageMode() {
   showFabMenu.value = false
   activeTab.value = 'schedule'
+  // 设置为自然语言模式并显示表单
+  isNaturalLanguageMode.value = true
+  createMode.value = CREATE_MODES.NATURAL
+  isFormVisible.value = true
+  naturalLanguageInput.value = ''
+  
+  // 等待组件渲染后聚焦到输入框
   setTimeout(() => {
     const nlpInput = document.querySelector('.nlp-input-container')
     if (nlpInput) {
@@ -227,11 +234,13 @@ const {
   conflictDialog,
   isRecording,
   recordingDuration,
-  parseNaturalLanguage, // 新增：只解析不创建
-  handleNaturalLanguageSubmit,
+  parseAndCreate,
+  queryExistingSchedules,  // 新增查询函数
   startVoiceInput,
   stopRecording,
-  handleCancelClick
+  handleCancelClick,
+  isQueryIntent,
+  speak  // 引入语音函数
 } = useNaturalLanguage(API_URL, fetchSchedules)
 
 // ✅ 新增：定义本地播报函数，解决模板中找不到 speak 的问题
@@ -258,7 +267,7 @@ async function handleParseAndFill() {
   const timezoneOffset = timezoneInfo.offset
   
   // 调用解析接口
-  const result = await parseNaturalLanguage(timezoneOffset)
+  const result = await parseAndCreate(timezoneOffset)
   
   if (result && result.success) {
     console.log('✅ 解析成功，准备填充表单:', result.data)
@@ -296,6 +305,37 @@ async function handleParseAndFill() {
   } else {
     console.error('❌ 解析失败')
     showNotification('error', '❌ 解析失败，请重试或手动输入')
+  }
+}
+
+/**
+ * 处理自然语言查询日程
+ */
+async function handleQuerySchedules() {
+  console.log('🔍 开始查询日程...')
+  
+  // 获取时区偏移量
+  const timezoneInfo = getTimezoneInfo()
+  const timezoneOffset = timezoneInfo.offset
+  
+  try {
+    isProcessingNL.value = true
+    
+    const result = await queryExistingSchedules(naturalLanguageInput.value, timezoneOffset)
+    
+    if (result.success) {
+      console.log('✅ 查询成功:', result.data)
+      // 注意：查询结果现在会在NaturalLanguageInput组件中显示
+      showNotification('success', `✅ ${result.data.response}`)
+    } else {
+      console.error('❌ 查询失败:', result.error)
+      showNotification('error', `❌ ${result.error}`)
+    }
+  } catch (err) {
+    console.error('查询异常:', err)
+    showNotification('error', '❌ 查询失败，请稍后重试')
+  } finally {
+    isProcessingNL.value = false
   }
 }
 

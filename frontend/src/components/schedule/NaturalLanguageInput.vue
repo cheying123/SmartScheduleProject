@@ -1,6 +1,15 @@
 <script setup>
-import { Globe, PlusCircle } from 'lucide-vue-next'
-import { formatRecordingTime } from '@/utils/timeUtils'
+import { ref, computed, watch } from 'vue'
+import { 
+  Mic, 
+  Volume2, 
+  Send, 
+  Loader, 
+  CheckCircle, 
+  Calendar, 
+  Clock,
+  X 
+} from 'lucide-vue-next'
 
 const props = defineProps({
   inputValue: {
@@ -30,36 +39,91 @@ const emit = defineEmits([
   'cancel',
   'switch-mode',
   'voice-input',
-  'parse-and-fill',  // 新增：解析并预填表单
+  'parse-and-fill',
+  'query-schedules',  // 新增查询事件
   'update:inputValue'
 ])
+
+// 本地状态
+const queryResult = ref(null)
+
+// 计算属性
+const submitButtonText = computed(() => {
+  // 如果输入包含查询关键词，则显示"查询日程"，否则显示"创建日程"
+  const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月']
+  const isQuery = queryKeywords.some(keyword => props.inputValue.includes(keyword))
+  return isQuery ? '🔍 查询日程' : '✨ 创建日程'
+})
+
+const isQueryMode = computed(() => {
+  const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月']
+  return queryKeywords.some(keyword => props.inputValue.includes(keyword))
+})
+
+// 格式化时间
+function formatTime(timeStr) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// 获取优先级标签
+function getPriorityLabel(priority) {
+  const labels = {
+    1: '低',
+    2: '中',
+    3: '高'
+  }
+  return labels[priority] || '中'
+}
+
+// 处理提交
+function handleSubmit() {
+  if (isQueryMode.value) {
+    emit('query-schedules')
+  } else {
+    emit('submit')
+  }
+}
+
+// 清除查询结果
+function clearQueryResult() {
+  queryResult.value = null
+  emit('update:inputValue', '')
+}
 </script>
 
 <template>
   <div class="form-container nl-mode">
     <div class="form-header">
       <h2>
-        <Globe :size="24" />
+        <Mic :size="24" />
         🎤 智能语音/文本输入
       </h2>
       <button class="mode-switch-btn" @click="$emit('switch-mode')" title="切换到传统表单模式">
-        <PlusCircle :size="18" />
+        <Calendar :size="18" />
         <span>使用表单</span>
       </button>
     </div>
     
     <p class="nl-hint">💡 试试这样说：</p>
     <ul class="nl-examples">
-      <li>"安排下周三下午两点的团队会议"</li>
-      <li>"提醒我每周一早上检查邮箱"</li>
-      <li>"明天上午 9 点与客户见面"</li>
+      <li>安排下周三下午两点的团队会议</li>
+      <li>查询今天有哪些日程</li>
+      <li>明天上午9点与客户见面</li>
+      <li>查看本周的日程安排</li>
     </ul>
     
     <div class="nl-input-group">
       <textarea 
         :value="inputValue"
         @input="$emit('update:inputValue', $event.target.value)"
-        placeholder="请输入您的指令，或直接点击麦克风说话..."
+        placeholder="请输入您的指令，或直接点击麦克风说话...（如：安排明天下午3点开会，或查询今天日程）"
         rows="4"
         :disabled="isProcessing || isRecording"
       ></textarea>
@@ -67,14 +131,60 @@ const emit = defineEmits([
       <!-- AI 处理状态指示器 -->
       <div v-if="isAIProcessing" class="ai-processing-indicator">
         <span class="ai-icon">🤖</span>
-        <span>AI 正在智能解析中...</span>
+        <span>AI 正在{{ isQueryMode ? '查询' : '解析' }}中...</span>
       </div>
       
       <!-- 录音状态指示器 -->
       <div v-if="isRecording" class="recording-status-bar">
         <span class="recording-dot"></span>
         <span class="recording-label">正在录音</span>
-        <span class="recording-time">{{ formatRecordingTime(recordingDuration) }}</span>
+        <span class="recording-time">{{ recordingDuration }}s</span>
+      </div>
+      
+      <!-- 查询结果区域 -->
+      <div v-if="queryResult" class="query-result-container">
+        <div class="query-result-header">
+          <h3>{{ queryResult.query_description }}</h3>
+          <button @click="clearQueryResult" class="clear-result-btn">
+            <X :size="16" />
+          </button>
+        </div>
+        <div class="query-result-content">
+          <div v-if="queryResult.schedules && queryResult.schedules.length > 0" class="result-schedules">
+            <div 
+              v-for="schedule in queryResult.schedules" 
+              :key="schedule.id" 
+              class="schedule-card"
+            >
+              <div class="schedule-info">
+                <div class="schedule-title">{{ schedule.title }}</div>
+                <div class="schedule-time">
+                  <Clock :size="14" />
+                  {{ formatTime(schedule.start_time) }}
+                </div>
+                <div v-if="schedule.content" class="schedule-details">
+                  {{ schedule.content }}
+                </div>
+                <div class="schedule-meta">
+                  <span class="priority-badge" :class="`priority-${schedule.priority}`">
+                    {{ getPriorityLabel(schedule.priority) }}
+                  </span>
+                  <span class="completion-status" v-if="schedule.is_completed">
+                    <CheckCircle :size="14" />
+                    已完成
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="no-results">
+            <p>没有找到符合条件的日程。</p>
+          </div>
+          
+          <div class="result-summary" v-if="queryResult.response">
+            <p>{{ queryResult.response }}</p>
+          </div>
+        </div>
       </div>
       
       <!-- 操作按钮区域 -->
@@ -88,7 +198,7 @@ const emit = defineEmits([
           :class="{ 'recording': isRecording }"
         >
           <span class="btn-icon">🎤</span>
-          <span class="btn-text">{{ isRecording ? '点击停止录音' : '语音输入' }}</span>
+          <span class="btn-text">{{ isRecording ? '停止录音' : '语音输入' }}</span>
           <span v-if="isRecording" class="wave-animation">
             <span class="wave-bar"></span>
             <span class="wave-bar"></span>
@@ -102,10 +212,23 @@ const emit = defineEmits([
           <div class="primary-actions">
             <button 
               type="button" 
+              class="btn-query" 
+              @click="$emit('query-schedules')"
+              :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
+              title="查询现有日程"
+              v-if="!isQueryMode"
+            >
+              <span class="btn-emoji">🔍</span>
+              <span class="btn-label">查询日程</span>
+            </button>
+            
+            <button 
+              type="button" 
               class="btn-parse" 
               @click="$emit('parse-and-fill')"
               :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
               title="AI 解析后预填到表单，供您审查修改"
+              v-if="!isQueryMode"
             >
               <span class="btn-emoji">📝</span>
               <span class="btn-label">{{ isAIProcessing ? '解析中...' : '预填表单' }}</span>
@@ -114,12 +237,12 @@ const emit = defineEmits([
             <button 
               type="button" 
               class="btn-submit" 
-              @click="$emit('submit')"
+              @click="handleSubmit"
               :disabled="isProcessing || !inputValue.trim() || isRecording"
-              title="直接创建日程（不经过审查）"
+              :title="isQueryMode ? '查询日程' : '创建日程'"
             >
-              <span class="btn-emoji">✨</span>
-              <span class="btn-label">{{ isProcessing ? '处理中...' : '创建日程' }}</span>
+              <span class="btn-emoji">{{ isQueryMode ? '🔍' : '✨' }}</span>
+              <span class="btn-label">{{ isProcessing ? '处理中...' : (isQueryMode ? '查询日程' : '创建日程') }}</span>
             </button>
           </div>
           
@@ -137,7 +260,6 @@ const emit = defineEmits([
     </div>
   </div>
 </template>
-
 
 <style scoped>
 .nl-mode {
@@ -332,6 +454,142 @@ const emit = defineEmits([
   background: rgba(255, 255, 255, 0.6);
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+/* 查询结果区域 */
+.query-result-container {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9ff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.query-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.query-result-header h3 {
+  margin: 0;
+  color: #32325d;
+  font-size: 1.1rem;
+}
+
+.clear-result-btn {
+  background: none;
+  border: none;
+  color: #8898aa;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.clear-result-btn:hover {
+  background: #e9ecef;
+  color: #32325d;
+}
+
+.result-schedules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.schedule-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  border-left: 3px solid #5e72e4;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.schedule-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.schedule-title {
+  font-weight: 600;
+  color: #32325d;
+  font-size: 1.05rem;
+}
+
+.schedule-time {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #8898aa;
+  font-size: 0.9rem;
+}
+
+.schedule-details {
+  color: #525f7f;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.schedule-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.priority-badge {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.priority-badge.priority-1 {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.priority-badge.priority-2 {
+  background: #fff8e1;
+  color: #ffa000;
+}
+
+.priority-badge.priority-3 {
+  background: #ffebee;
+  color: #f44336;
+}
+
+.completion-status {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #4caf50;
+}
+
+.no-results {
+  text-align: center;
+  padding: 2rem;
+  color: #8898aa;
+}
+
+.result-summary {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #e8f4f8;
+  border-radius: 6px;
+  border-left: 3px solid #26c6da;
+}
+
+.result-summary p {
+  margin: 0;
+  color: #32325d;
+  font-size: 0.95rem;
 }
 
 /* 操作按钮区域 */
