@@ -9,6 +9,14 @@
       
       <!-- 统计徽章 -->
       <div v-if="recommendations && recommendations.length > 0" class="stats-badges">
+        <span v-if="timePreferenceCount > 0" class="stat-badge time-pref">
+          <Check :size="14" />
+          {{ timePreferenceCount }} 习惯
+        </span>
+        <span v-if="balanceCount > 0" class="stat-badge balance">
+          <Globe :size="14" />
+          {{ balanceCount }} 建议
+        </span>
         <span v-if="urgentCount > 0" class="stat-badge urgent">
           <AlertCircle :size="14" />
           {{ urgentCount }} 紧急
@@ -26,7 +34,7 @@
     <!-- 工具栏 -->
     <div class="notifications-toolbar">
       <button class="btn-refresh" @click="loadRecommendations">
-        <Check :size="16" />
+        <Sparkles :size="16" />
         <span>刷新推荐</span>
       </button>
       
@@ -34,10 +42,10 @@
         <Filter :size="16" class="filter-icon" />
         <select v-model="notificationFilter" class="filter-select">
           <option value="all">全部类型</option>
-          <option value="schedule_reminder">日程提醒</option>
-          <option value="weather">天气提示</option>
           <option value="time_preference">时间偏好</option>
           <option value="balance">平衡建议</option>
+          <option value="schedule_reminder">日程提醒</option>
+          <option value="weather">天气提示</option>
           <option value="info">提示信息</option>
         </select>
       </div>
@@ -92,15 +100,22 @@
                 :is="getReminderIcon(rec.priority)" 
                 :size="24"
               />
-              <Sun v-else-if="rec.type === 'weather'" :size="24" />
               <Check v-else-if="rec.type === 'time_preference'" :size="24" />
-              <Globe v-else :size="24" />
+              <Globe v-else-if="rec.type === 'balance'" :size="24" />
+              <Sun v-else-if="rec.type === 'weather'" :size="24" />
+              <Bell v-else :size="24" />
             </div>
             <div class="notification-content">
               <h4>
                 {{ rec.type === 'schedule_reminder' ? '⏰ 日程提醒' : getNotificationTitle(rec.type) }}
               </h4>
               <p>{{ rec.message }}</p>
+              
+              <!-- 额外信息 -->
+              <div v-if="rec.suggested_hour" class="extra-info">
+                <Clock :size="14" />
+                <span>推荐时间: {{ rec.suggested_hour }}:00</span>
+              </div>
               
               <!-- 倒计时详情（仅日程提醒显示） -->
               <div v-if="rec.type === 'schedule_reminder' && rec.countdown" class="countdown-details">
@@ -147,7 +162,8 @@ import {
   Sun, 
   Globe, 
   Calendar, 
-  Filter 
+  Filter,
+  Sparkles
 } from 'lucide-vue-next';
 
 // 定义组件的 props
@@ -172,7 +188,17 @@ const emit = defineEmits(['navigate-to-schedule', 'load-recommendations']);
 // 通知过滤器
 const notificationFilter = ref('all');
 
-// 计算紧急通知数量
+// 计算各类推荐的数量
+const timePreferenceCount = computed(() => {
+  if (!props.recommendations) return 0;
+  return props.recommendations.filter(r => r.type === 'time_preference').length;
+});
+
+const balanceCount = computed(() => {
+  if (!props.recommendations) return 0;
+  return props.recommendations.filter(r => r.type === 'balance').length;
+});
+
 const urgentCount = computed(() => {
   if (!props.recommendations) return 0;
   return props.recommendations.filter(r => r.priority === 'urgent').length;
@@ -218,11 +244,11 @@ function getNotificationIcon(type) {
 // 获取通知颜色
 function getNotificationColor(type) {
   const colors = {
-    'schedule_reminder': '#f97316',
-    'weather': '#0ea5e9',
-    'time_preference': '#10b981',
-    'balance': '#8b5cf6',
-    'info': '#667eea'
+    'schedule_reminder': '#f97316',  // 橙色 - 日程提醒
+    'weather': '#0ea5e9',           // 蓝色 - 天气
+    'time_preference': '#10b981',   // 绿色 - 时间偏好
+    'balance': '#8b5cf6',           // 紫色 - 平衡建议
+    'info': '#667eea'               // 靛蓝色 - 信息提示
   };
   return colors[type] || '#667eea';
 }
@@ -341,6 +367,8 @@ function loadRecommendations() {
 .stats-badges {
   display: flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .stat-badge {
@@ -351,6 +379,16 @@ function loadRecommendations() {
   border-radius: 20px;
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+.stat-badge.time-pref {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.stat-badge.balance {
+  background-color: #ede9fe;
+  color: #5b21b6;
 }
 
 .stat-badge.urgent {
@@ -376,7 +414,7 @@ function loadRecommendations() {
 }
 
 .btn-refresh {
-  background-color: #5E72E4;
+  background: linear-gradient(135deg, #5E72E4 0%, #825EE4 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -391,8 +429,8 @@ function loadRecommendations() {
 }
 
 .btn-refresh:hover {
-  background-color: #4c5fd5;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.4);
 }
 
 .filter-group {
@@ -515,6 +553,7 @@ function loadRecommendations() {
   border-left-style: solid;
   background-color: #f8f9fa;
   transition: all 0.3s ease;
+  border: 1px solid #e9ecef;
 }
 
 .notification-item:hover {
@@ -534,47 +573,92 @@ function loadRecommendations() {
   color: #5E72E4;
 }
 
-.notification-content {
-  flex-grow: 1;
+/* 为不同类型的通知定制图标背景色 */
+.type-time-preference .notification-icon {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
 }
 
-.notification-content h4 {
-  margin: 0 0 0.5rem 0;
-  color: #32325D;
-  font-size: 1.1rem;
+.type-balance .notification-icon {
+  background-color: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
 }
 
-.notification-content p {
-  margin: 0;
-  color: #525F7F;
-  line-height: 1.6;
+.type-weather .notification-icon {
+  background-color: rgba(14, 165, 233, 0.1);
+  color: #0ea5e9;
+}
+
+.type-info .notification-icon {
+  background-color: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.type-schedule-reminder .notification-icon {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
 }
 
 /* 日程提醒特殊样式 */
-.notification-item.type-schedule-reminder {
+.type-schedule-reminder {
   animation: none;
+}
+
+/* 不同类型的推荐样式 */
+.type-time-preference {
+  background-color: #ecfdf5;
+  border-left-color: #10b981;
+  border: 1px solid #d1fae5;
+}
+
+.type-balance {
+  background-color: #faf5ff;
+  border-left-color: #8b5cf6;
+  border: 1px solid #f3e8ff;
+}
+
+.type-weather {
+  background-color: #e0f2fe;
+  border-left-color: #0ea5e9;
+  border: 1px solid #bae6fd;
+}
+
+.type-info {
+  background-color: #eff6ff;
+  border-left-color: #3b82f6;
+  border: 1px solid #dbeafe;
+}
+
+.type-schedule-reminder {
+  background-color: #fffbeb;
+  border-left-color: #f59e0b;
+  border: 1px solid #fde68a;
 }
 
 /* 不同优先级的样式 */
 .reminder-urgent {
   background-color: #ffebee;
   border-left-color: #f44336;
+  border: 1px solid #ffcdd2;
   animation: pulse-border 2s infinite;
 }
 
 .reminder-high {
   background-color: #fff3e0;
   border-left-color: #ff9800;
+  border: 1px solid #ffe0b2;
 }
 
 .reminder-medium {
   background-color: #fff9c4;
   border-left-color: #ffc107;
+  border: 1px solid #ffecb3;
 }
 
 .reminder-low {
   background-color: #e3f2fd;
   border-left-color: #2196F3;
+  border: 1px solid #bbdefb;
 }
 
 @keyframes pulse-border {

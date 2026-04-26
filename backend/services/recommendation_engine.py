@@ -23,11 +23,14 @@ def generate_schedule_recommendations(user_id):
     
     # 分析工作时间偏好（UTC 转本地时间 UTC+8）
     work_hours = []
+    work_days = []
     for schedule in user_schedules:
         utc_time = schedule.start_time
         local_time = utc_time + timedelta(hours=8)
         local_hour = local_time.hour
+        local_weekday = local_time.weekday()  # 0=Monday, 6=Sunday
         work_hours.append(local_hour)
+        work_days.append(local_weekday)
     
     if work_hours:
         hour_counter = Counter(work_hours)
@@ -38,10 +41,24 @@ def generate_schedule_recommendations(user_id):
             'message': f'根据历史记录，您通常在{most_common_hour}点安排活动，建议保持这个习惯',
             'suggested_hour': most_common_hour
         })
+
+    # 分析一周中最活跃的工作日
+    if work_days:
+        day_counter = Counter(work_days)
+        most_common_day_num = day_counter.most_common(1)[0][0]
+        day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+        most_common_day = day_names[most_common_day_num]
+        
+        recommendations.append({
+            'type': 'time_preference',
+            'message': f'您最常在{most_common_day}安排活动，这是您的高效时段',
+            'suggested_day': most_common_day_num
+        })
     
     # 检测休息时间
     morning_activities = []
     afternoon_activities = []
+    evening_activities = []
     
     for schedule in user_schedules:
         utc_time = schedule.start_time
@@ -52,13 +69,80 @@ def generate_schedule_recommendations(user_id):
             morning_activities.append(schedule)
         elif 12 <= local_hour < 18:
             afternoon_activities.append(schedule)
+        else:
+            evening_activities.append(schedule)
     
-    if len(morning_activities) > len(afternoon_activities) * 2:
+    # 建议平衡时间分配
+    max_activities = max(len(morning_activities), len(afternoon_activities), len(evening_activities))
+    if max_activities == len(morning_activities) and len(morning_activities) > len(afternoon_activities) * 2 and len(morning_activities) > len(evening_activities) * 2:
         recommendations.append({
             'type': 'balance',
-            'message': '您上午的日程较多，建议适当安排下午的休息时间'
+            'message': '您上午的日程较多，建议适当安排下午或晚上的休息时间'
         })
-    
+    elif max_activities == len(afternoon_activities) and len(afternoon_activities) > len(morning_activities) * 2 and len(afternoon_activities) > len(evening_activities) * 2:
+        recommendations.append({
+            'type': 'balance',
+            'message': '您下午的日程较多，建议适当安排上午或晚上的休息时间'
+        })
+    elif max_activities == len(evening_activities) and len(evening_activities) > len(morning_activities) * 2 and len(evening_activities) > len(afternoon_activities) * 2:
+        recommendations.append({
+            'type': 'balance',
+            'message': '您晚上的日程较多，建议适当安排白天的休息时间'
+        })
+
+    # 检测重复性日程并建议优化
+    title_counts = Counter([s.title for s in user_schedules])
+    frequent_titles = [title for title, count in title_counts.items() if count >= 3]
+    if frequent_titles:
+        recommendations.append({
+            'type': 'balance',
+            'message': f'检测到您经常安排"{frequent_titles[0]}"这类活动，可考虑设置为重复日程以节省时间'
+        })
+
+    # 建议锻炼时间（如果工作日程过多）
+    total_work_hours = sum(1 for s in user_schedules if '工作' in s.title or '会议' in s.title)
+    if len(user_schedules) > 10 and total_work_hours > len(user_schedules) / 2:
+        # 找到用户最不忙的时间段
+        free_hours = [i for i in range(24) if i not in work_hours]
+        if free_hours:
+            recommended_exercise_hour = free_hours[0]  # 推荐第一个空闲时间段
+            recommendations.append({
+                'type': 'balance',
+                'message': f'检测到您的日程较满，建议在{recommended_exercise_hour}点左右安排锻炼时间，有助于劳逸结合'
+            })
+
+    # 建议休息时间（基于连续工作时间）
+    consecutive_work_times = []
+    sorted_schedules = sorted(user_schedules, key=lambda x: x.start_time)
+    current_sequence = []
+    for i, schedule in enumerate(sorted_schedules):
+        if current_sequence:
+            # 如果当前日程与上一个日程间隔小于2小时，则认为是连续的
+            prev_end_time = current_sequence[-1].start_time + timedelta(minutes=int(current_sequence[-1].duration or 60))
+            if schedule.start_time - prev_end_time < timedelta(hours=2):
+                current_sequence.append(schedule)
+            else:
+                if len(current_sequence) > 1:  # 至少2个连续日程才算序列
+                    consecutive_work_times.append(current_sequence[:])
+                current_sequence = [schedule]
+        else:
+            current_sequence = [schedule]
+
+    if current_sequence and len(current_sequence) > 1:
+        consecutive_work_times.append(current_sequence)
+
+    # 如果有较长的连续工作时间，建议休息
+    for seq in consecutive_work_times:
+        if len(seq) >= 3:  # 3个或以上连续日程
+            last_schedule = seq[-1]
+            local_end_time = (last_schedule.start_time + timedelta(minutes=int(last_schedule.duration or 60))) + timedelta(hours=8)
+            rest_hour = local_end_time.hour
+            recommendations.append({
+                'type': 'balance',
+                'message': f'检测到您有连续的工作安排，建议在{rest_hour}点之后安排适当的休息时间，缓解疲劳'
+            })
+            break  # 只推荐一次休息
+
     # ===== 优化后的天气相关建议 =====
     now_beijing = datetime.now() + timedelta(hours=8)
     today_beijing = now_beijing.date()

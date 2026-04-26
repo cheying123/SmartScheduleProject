@@ -1,6 +1,6 @@
 <script setup>
 import { Calendar, User, Bell, Settings, LogOut, BarChart } from 'lucide-vue-next'
-import { useRouter } from 'vue-router' // ← 新增导入
+import { useRouter } from 'vue-router'
 import { NAVIGATION } from '@/constants'
 
 const props = defineProps({
@@ -14,7 +14,7 @@ const props = defineProps({
   },
   user: {
     type: Object,
-    default: null // 允许为 null
+    default: null
   },
   recommendationsCount: {
     type: Number,
@@ -23,7 +23,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggle-collapse', 'tab-change', 'logout'])
-const router = useRouter() // ← 新增
+const router = useRouter()
 
 function handleTabChange(tab) {
   emit('tab-change', tab)
@@ -34,14 +34,13 @@ function handleLogout() {
 }
 
 function goToCalendar() {
-  router.push('/calendar') // ← 新增跳转逻辑
+  router.push('/calendar')
 }
 
 // 安全获取用户名的首字母
 function getUserInitial() {
   return props.user?.username?.charAt(0)?.toUpperCase() || '?'
 }
-
 </script>
 
 <template>
@@ -84,10 +83,11 @@ function getUserInitial() {
         <span v-if="!isCollapsed">个人信息</span>
       </a>
       
+      <!-- 消息通知（包含智能推荐）导航项 -->
       <a 
         href="#" 
         class="nav-item" 
-        :class="{ 'active': activeTab === NAVIGATION.tabs.NOTIFICATIONS }"
+        :class="{ 'active': activeTab === NAVIGATION.tabs.NOTIFICATIONS || activeTab === 'recommendations' }"
         @click.prevent="handleTabChange(NAVIGATION.tabs.NOTIFICATIONS)"
       >
         <Bell :size="20" />
@@ -128,6 +128,8 @@ function getUserInitial() {
 </template>
 
 <style scoped>
+/* 从 HomeView.vue 复制这些完整的样式块 */
+
 /* 从 HomeView.vue 复制这些完整的样式块 */
 
 /* 侧边栏容器 */

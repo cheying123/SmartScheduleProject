@@ -200,118 +200,19 @@ def get_recommendations(current_user):
     
     return jsonify(all_recommendations)
 
-    """获取智能推荐和即将开始的日程提醒"""
+
+@recommendations_bp.route('/smart-recommendations', methods=['GET'])
+@token_required
+def get_smart_recommendations(current_user):
+    """获取纯智能推荐（不包含日程提醒）"""
     current_user_id = current_user.id
     
-    all_recommendations = []
-    
-    # 1. 获取原有的智能推荐
     try:
+        # 获取智能推荐（时间偏好、平衡建议、天气等）
         smart_recommendations = generate_schedule_recommendations(current_user_id)
-        all_recommendations.extend(smart_recommendations)
+        # 只返回非日程提醒类型的推荐
+        filtered_recommendations = [r for r in smart_recommendations if r.get('type') != 'schedule_reminder']
+        return jsonify(filtered_recommendations)
     except Exception as e:
-        print(f"生成智能推荐失败：{e}")
-    
-    # 2. 新增：获取即将开始的日程提醒（未来 48 小时内）
-    try:
-        # 当前时间（本地时间和 UTC 时间）
-        now_local = datetime.now() + timedelta(hours=8)  # 北京时间
-        now_utc = datetime.now()  # UTC 时间
-        
-        # 未来 48 小时（UTC 时间）
-        end_time_utc = now_utc + timedelta(hours=48)
-        
-        print(f"\n{'='*60}")
-        print(f"🔍 查询参数：user_id={current_user_id}")
-        print(f"   当前 UTC 时间：{now_utc}")
-        print(f"   当前北京时间：{now_local}")
-        print(f"   查询结束时间：{end_time_utc}")
-        print(f"{'='*60}")
-        
-        # 先查询用户的所有日程（调试用）
-        all_schedules = Schedule.query.filter_by(user_id=current_user_id).order_by(Schedule.start_time).all()
-        print(f"\n📋 用户所有日程（共{len(all_schedules)}个）：")
-        for s in all_schedules:
-            local_time = s.start_time + timedelta(hours=8)
-            is_in_range = now_utc <= s.start_time <= end_time_utc
-            status = "✅ 在范围内" if is_in_range else ("❌ 已过去" if s.start_time < now_utc else "⏳ 超出 48 小时")
-            print(f"   {s.title}: UTC={s.start_time}, 北京={local_time} [{status}]")
-        
-        # 查询未来 48 小时内的所有日程（数据库存储的是 UTC 时间）
-        upcoming_schedules = Schedule.query.filter(
-            Schedule.user_id == current_user_id,
-            Schedule.start_time >= now_utc,
-            Schedule.start_time <= end_time_utc
-        ).order_by(Schedule.start_time).all()
-        
-        print(f"\n📅 找到 {len(upcoming_schedules)} 个即将开始的日程（在 48 小时范围内）")
-        
-        # 为每个即将开始的日程生成倒计时提醒
-        for schedule in upcoming_schedules:
-            # 将 UTC 时间转换为本地时间（+8 小时）
-            local_start_time = schedule.start_time + timedelta(hours=8)
-            
-            print(f"\n  📌 日程：{schedule.title}")
-            print(f"     UTC 时间：{schedule.start_time}")
-            print(f"     北京时间：{local_start_time}")
-            
-            # 使用本地时间生成倒计时信息
-            countdown_info = CountdownService.get_countdown_info(
-                local_start_time, 
-                'comprehensive'  # 使用全面的提醒配置（15 分钟、30 分钟、1 小时、2 小时、1 天）
-            )
-            
-            print(f"     ⏰ 倒计时：{countdown_info['remaining_text']}")
-            print(f"     is_started={countdown_info['is_started']}")
-            
-            if countdown_info and not countdown_info['is_started']:
-                # 计算剩余分钟数
-                remaining_minutes = abs(countdown_info['remaining_seconds']) / 60
-                
-                print(f"     ✅ 添加提醒，优先级判定中...")
-                
-                # 定义提醒时间段（分钟）和对应的优先级
-                reminder_windows = [
-                    (15, 'urgent'),      # 15 分钟内 - 紧急（红色）
-                    (60, 'high'),        # 1 小时内 - 高优先级（橙色）
-                    (180, 'medium'),     # 3 小时内 - 中等（黄色）
-                    (1440, 'low'),       # 24 小时内 - 低优先级（蓝色）
-                    (2880, 'info')       # 48 小时内 - 信息（灰色）
-                ]
-                
-                # 确定优先级并生成提醒
-                for window, priority in reminder_windows:
-                    if remaining_minutes <= window:
-                        all_recommendations.append({
-                            'id': f'countdown_{schedule.id}',
-                            'type': 'schedule_reminder',
-                            'priority': priority,
-                            'message': f'⏰ 【{schedule.title}】{countdown_info["remind_message"]}',
-                            'schedule_id': schedule.id,
-                            'schedule_title': schedule.title,
-                            # 返回本地时间给前端
-                            'start_time': local_start_time.isoformat(),
-                            'start_time_utc': schedule.start_time.isoformat(),  # 保留 UTC 时间
-                            'countdown': countdown_info,
-                            'created_at': now_local.isoformat()
-                        })
-                        print(f"     🎯 确定优先级：{priority} (剩余{remaining_minutes:.0f}分钟)")
-                        break  # 只添加最紧急的那个提醒
-            else:
-                print(f"     ❌ 跳过（已开始或未通过检查）")
-    
-    except Exception as e:
-        print(f"生成日程提醒失败：{e}")
-        import traceback
-        traceback.print_exc()
-
-    
-    # 3. 排序：按优先级和剩余时间排序（紧急的在前）
-    priority_order = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
-    
-    all_recommendations.sort(key=lambda x: (
-        priority_order.get(x.get('priority', 'info'), 5),
-        x.get('countdown', {}).get('remaining_seconds', 999999)
-    ))
-    
-    return jsonify(all_recommendations)
+        print(f"获取智能推荐失败：{e}")
+        return jsonify([])

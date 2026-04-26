@@ -528,8 +528,22 @@ const groupedSchedules = computed(() => {
   return groups
 })
 
+// 新增：智能推荐计算属性
+const smartRecommendationsFiltered = computed(() => {
+  if (!smartRecommendations.value) return []
+  return smartRecommendations.value.filter(r => 
+    r.type === 'time_preference' || 
+    r.type === 'balance' || 
+    r.type === 'weather' || 
+    r.type === 'info'
+  )
+})
+
 // 方法
 function getTabTitle() {
+  if (activeTab.value === 'recommendations') {
+    return '智能推荐'
+  }
   return NAVIGATION.titles[activeTab.value] || '我的日程'
 }
 
@@ -692,6 +706,8 @@ onMounted(async () => {
 onUnmounted(() => {
   stopRecording()
 })
+
+
 </script>
 
 <template>
@@ -799,6 +815,17 @@ onUnmounted(() => {
         />
       </div>
 
+      <!-- 消息通知页面（包含智能推荐） -->
+      <div v-if="activeTab === NAVIGATION.tabs.NOTIFICATIONS || activeTab === 'recommendations'" class="tab-content">
+        <NotificationsCenter
+          :recommendations="recommendations"
+          :API_URL="API_URL"
+          :token="userStore.token"
+          @navigate-to-schedule="navigateToSchedule"
+          @load-recommendations="loadRecommendations"
+        />
+      </div>
+
       <!-- 个人资料页面 -->
       <div v-if="activeTab === 'profile'" class="tab-content">
         <ProfileCard
@@ -806,17 +833,6 @@ onUnmounted(() => {
           :schedules="schedules"
           @edit="openProfileEdit"
           @refresh-weather="refreshWeatherFromProfile"
-        />
-      </div>
-
-      <!-- 通知页面（带倒计时提醒） -->
-      <div v-if="activeTab === 'notifications'" class="tab-content">
-        <NotificationsCenter
-          :recommendations="recommendations"
-          :API_URL="API_URL"
-          :token="userStore.token"
-          @navigate-to-schedule="navigateToSchedule"
-          @load-recommendations="loadRecommendations"
         />
       </div>
 
