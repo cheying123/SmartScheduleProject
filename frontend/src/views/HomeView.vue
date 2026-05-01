@@ -381,18 +381,19 @@ async function handleQuerySchedules() {
 
   try {
     isProcessingNL.value = true
-    queryResult.value = null
-
+    // 不清空 queryResult，保持 has-results 状态稳定，防止面板闪烁
     const result = await queryExistingSchedules(naturalLanguageInput.value, timezoneOffset)
 
     if (result.success) {
       queryResult.value = result.data
       isResultCollapsed.value = false
     } else {
+      queryResult.value = null
       showNotification('error', `❌ ${result.error}`)
     }
   } catch (err) {
     console.error('查询异常:', err)
+    queryResult.value = null
     showNotification('error', '❌ 查询失败，请稍后重试')
   } finally {
     isProcessingNL.value = false
