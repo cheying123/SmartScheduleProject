@@ -57,6 +57,14 @@ def get_timezone_info():
     }
 
 
+def convert_to_datetime(dt_str, timezone_offset_minutes=480):
+    """将 ISO 时间字符串转为 UTC datetime。AI 解析返回的是本地时间。"""
+    if isinstance(dt_str, str):
+        dt = datetime.fromisoformat(dt_str.replace('Z', ''))
+        return dt - timedelta(minutes=timezone_offset_minutes)
+    return dt_str
+
+
 def format_datetime(dt, format_string='%Y-%m-%d %H:%M:%S'):
     """
     格式化日期时间对象

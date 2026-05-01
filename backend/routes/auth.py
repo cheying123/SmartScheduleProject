@@ -1,4 +1,3 @@
-# NEW_FILE_CODE
 from flask import Blueprint, request, jsonify
 from extensions import db
 from models.user import User
@@ -43,9 +42,9 @@ def register():
             'token': token
         }), 201
         
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': f'注册失败：{str(e)}'}), 500
+        return jsonify({'error': '注册失败，请稍后重试'}), 500
 
 
 @auth_bp.route('/login', methods=['POST'])

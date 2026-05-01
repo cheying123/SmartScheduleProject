@@ -79,3 +79,19 @@ export const API_BASE_PATH = '/api'
 export const COOKIE_CONFIG = {
   expires: 7  // 7 天过期
 }
+
+// 自然语言查询关键词
+export const QUERY_KEYWORDS = [
+  '查询', '查看', '有没有', '什么时候',
+  '今天', '明天', '后天', '昨天', '前天',
+  '下周', '本周', '上周', '本月', '下个月', '这个月',
+  '周一', '周二', '周三', '周四', '周五', '周六', '周日', '周末',
+  '上午', '下午', '晚上'
+]
+
+// 一天中的时段
+export const TIME_OF_DAY_KEYWORDS = {
+  morning: ['上午', '早上', '早晨'],
+  afternoon: ['下午', '中午'],
+  evening: ['晚上', '傍晚', '夜间']
+}

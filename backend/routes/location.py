@@ -1,8 +1,10 @@
-# NEW_FILE_CODE
+import logging
 from flask import Blueprint, request, jsonify
 from utils.jwt_utils import token_required
 import requests
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 location_bp = Blueprint('location', __name__, url_prefix='/api/location')
 
@@ -89,7 +91,7 @@ def search_cities(current_user):
             return jsonify({'cities': [], 'error': '搜索失败'}), 200
             
     except Exception as e:
-        print(f"城市搜索失败：{e}")
+        logger.error("城市搜索失败: %s", e)
         return jsonify({'cities': [], 'error': str(e)}), 500
 
 

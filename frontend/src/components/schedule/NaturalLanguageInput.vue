@@ -1,14 +1,7 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { 
-  Mic, 
-  Volume2, 
-  Send, 
-  Loader, 
-  CheckCircle, 
-  Calendar, 
-  Clock,
-  X 
+import {
+  Mic,
+  Calendar,
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -40,62 +33,9 @@ const emit = defineEmits([
   'switch-mode',
   'voice-input',
   'parse-and-fill',
-  'query-schedules',  // 新增查询事件
+  'query-schedules',
   'update:inputValue'
 ])
-
-// 本地状态
-const queryResult = ref(null)
-
-// 计算属性
-const submitButtonText = computed(() => {
-  // 如果输入包含查询关键词，则显示"查询日程"，否则显示"创建日程"
-  const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月']
-  const isQuery = queryKeywords.some(keyword => props.inputValue.includes(keyword))
-  return isQuery ? '🔍 查询日程' : '✨ 创建日程'
-})
-
-const isQueryMode = computed(() => {
-  const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月']
-  return queryKeywords.some(keyword => props.inputValue.includes(keyword))
-})
-
-// 格式化时间
-function formatTime(timeStr) {
-  if (!timeStr) return ''
-  const date = new Date(timeStr)
-  return date.toLocaleString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-// 获取优先级标签
-function getPriorityLabel(priority) {
-  const labels = {
-    1: '低',
-    2: '中',
-    3: '高'
-  }
-  return labels[priority] || '中'
-}
-
-// 处理提交
-function handleSubmit() {
-  if (isQueryMode.value) {
-    emit('query-schedules')
-  } else {
-    emit('submit')
-  }
-}
-
-// 清除查询结果
-function clearQueryResult() {
-  queryResult.value = null
-  emit('update:inputValue', '')
-}
 </script>
 
 <template>
@@ -131,7 +71,7 @@ function clearQueryResult() {
       <!-- AI 处理状态指示器 -->
       <div v-if="isAIProcessing" class="ai-processing-indicator">
         <span class="ai-icon">🤖</span>
-        <span>AI 正在{{ isQueryMode ? '查询' : '解析' }}中...</span>
+        <span>AI 正在处理中...</span>
       </div>
       
       <!-- 录音状态指示器 -->
@@ -139,52 +79,6 @@ function clearQueryResult() {
         <span class="recording-dot"></span>
         <span class="recording-label">正在录音</span>
         <span class="recording-time">{{ recordingDuration }}s</span>
-      </div>
-      
-      <!-- 查询结果区域 -->
-      <div v-if="queryResult" class="query-result-container">
-        <div class="query-result-header">
-          <h3>{{ queryResult.query_description }}</h3>
-          <button @click="clearQueryResult" class="clear-result-btn">
-            <X :size="16" />
-          </button>
-        </div>
-        <div class="query-result-content">
-          <div v-if="queryResult.schedules && queryResult.schedules.length > 0" class="result-schedules">
-            <div 
-              v-for="schedule in queryResult.schedules" 
-              :key="schedule.id" 
-              class="schedule-card"
-            >
-              <div class="schedule-info">
-                <div class="schedule-title">{{ schedule.title }}</div>
-                <div class="schedule-time">
-                  <Clock :size="14" />
-                  {{ formatTime(schedule.start_time) }}
-                </div>
-                <div v-if="schedule.content" class="schedule-details">
-                  {{ schedule.content }}
-                </div>
-                <div class="schedule-meta">
-                  <span class="priority-badge" :class="`priority-${schedule.priority}`">
-                    {{ getPriorityLabel(schedule.priority) }}
-                  </span>
-                  <span class="completion-status" v-if="schedule.is_completed">
-                    <CheckCircle :size="14" />
-                    已完成
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-else class="no-results">
-            <p>没有找到符合条件的日程。</p>
-          </div>
-          
-          <div class="result-summary" v-if="queryResult.response">
-            <p>{{ queryResult.response }}</p>
-          </div>
-        </div>
       </div>
       
       <!-- 操作按钮区域 -->
@@ -208,48 +102,44 @@ function clearQueryResult() {
         
         <!-- 第二行：操作按钮组 -->
         <div class="action-buttons-group">
-          <!-- 主要操作区 -->
           <div class="primary-actions">
-            <button 
-              type="button" 
-              class="btn-query" 
+            <button
+              type="button"
+              class="btn-query"
               @click="$emit('query-schedules')"
               :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
               title="查询现有日程"
-              v-if="!isQueryMode"
             >
               <span class="btn-emoji">🔍</span>
               <span class="btn-label">查询日程</span>
             </button>
-            
-            <button 
-              type="button" 
-              class="btn-parse" 
+
+            <button
+              type="button"
+              class="btn-submit"
+              @click="$emit('submit')"
+              :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
+              title="AI 直接创建日程"
+            >
+              <span class="btn-emoji">✨</span>
+              <span class="btn-label">{{ isProcessing ? '处理中...' : '创建日程' }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="btn-parse"
               @click="$emit('parse-and-fill')"
               :disabled="isProcessing || !inputValue.trim() || isRecording || isAIProcessing"
               title="AI 解析后预填到表单，供您审查修改"
-              v-if="!isQueryMode"
             >
               <span class="btn-emoji">📝</span>
               <span class="btn-label">{{ isAIProcessing ? '解析中...' : '预填表单' }}</span>
             </button>
-            
-            <button 
-              type="button" 
-              class="btn-submit" 
-              @click="handleSubmit"
-              :disabled="isProcessing || !inputValue.trim() || isRecording"
-              :title="isQueryMode ? '查询日程' : '创建日程'"
-            >
-              <span class="btn-emoji">{{ isQueryMode ? '🔍' : '✨' }}</span>
-              <span class="btn-label">{{ isProcessing ? '处理中...' : (isQueryMode ? '查询日程' : '创建日程') }}</span>
-            </button>
           </div>
-          
-          <!-- 次要操作区 -->
-          <button 
-            type="button" 
-            class="btn-cancel" 
+
+          <button
+            type="button"
+            class="btn-cancel"
             @click="$emit('cancel')"
             title="取消操作"
           >
@@ -456,142 +346,6 @@ function clearQueryResult() {
   border-radius: 4px;
 }
 
-/* 查询结果区域 */
-.query-result-container {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #f8f9ff;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.query-result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.query-result-header h3 {
-  margin: 0;
-  color: #32325d;
-  font-size: 1.1rem;
-}
-
-.clear-result-btn {
-  background: none;
-  border: none;
-  color: #8898aa;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.clear-result-btn:hover {
-  background: #e9ecef;
-  color: #32325d;
-}
-
-.result-schedules {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.schedule-card {
-  background: white;
-  border-radius: 8px;
-  padding: 1rem;
-  border-left: 3px solid #5e72e4;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.schedule-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.schedule-title {
-  font-weight: 600;
-  color: #32325d;
-  font-size: 1.05rem;
-}
-
-.schedule-time {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #8898aa;
-  font-size: 0.9rem;
-}
-
-.schedule-details {
-  color: #525f7f;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.schedule-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
-
-.priority-badge {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 12px;
-  font-weight: 500;
-}
-
-.priority-badge.priority-1 {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.priority-badge.priority-2 {
-  background: #fff8e1;
-  color: #ffa000;
-}
-
-.priority-badge.priority-3 {
-  background: #ffebee;
-  color: #f44336;
-}
-
-.completion-status {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  color: #4caf50;
-}
-
-.no-results {
-  text-align: center;
-  padding: 2rem;
-  color: #8898aa;
-}
-
-.result-summary {
-  margin-top: 1rem;
-  padding: 0.75rem;
-  background: #e8f4f8;
-  border-radius: 6px;
-  border-left: 3px solid #26c6da;
-}
-
-.result-summary p {
-  margin: 0;
-  color: #32325d;
-  font-size: 0.95rem;
-}
-
 /* 操作按钮区域 */
 .nl-actions {
   display: flex;
@@ -704,6 +458,42 @@ function clearQueryResult() {
   display: flex;
   gap: 12px;
   flex: 1;
+}
+
+/* 查询日程按钮 */
+.btn-query {
+  flex: 1;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+}
+
+.btn-query:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.btn-query:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-query:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 预填表单按钮 */

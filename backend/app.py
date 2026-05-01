@@ -1,45 +1,38 @@
-import os
-from flask import Flask, jsonify, request
-from flask_jwt_extended import JWTManager  # 新增导入
+import logging
+from flask import Flask, jsonify
+from flask_jwt_extended import JWTManager
 from config import Config
 from extensions import db, migrate, cors
-from models.user import User
-from models.schedule import Schedule
-from models.conflict import ScheduleConflict, UserBehaviorLog
 from routes.auth import auth_bp
 from routes.schedules import schedules_bp
 from routes.users import users_bp
 from routes.recommendations import recommendations_bp
 from routes.weather import weather_bp
-from routes.location import location_bp  # 新增
-from routes.analytics import analytics_bp  # 新增导入
+from routes.location import location_bp
+from routes.analytics import analytics_bp
 from routes.ai import ai_bp
-from apscheduler.schedulers.background import BackgroundScheduler  # ← 新增导入
-from services.recurring_service import RecurringService  # ← 新增导入
-from routes.assistant import assistant_bp # 确保引入了新创建的蓝图
+from routes.assistant import assistant_bp
+from apscheduler.schedulers.background import BackgroundScheduler
+from services.recurring_service import RecurringService
+
+logger = logging.getLogger(__name__)
 
 
 def create_app():
-    """应用工厂函数"""
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # ✅ 新增：在生产环境或调试时屏蔽 print 输出
-    if os.getenv('SUPPRESS_PRINTS') == 'True':
-        sys.stdout = open(os.devnull, 'w')
-    
     # 初始化扩展
     db.init_app(app)
     migrate.init_app(app, db)
-    jwt = JWTManager(app)  # 新增：初始化 JWTManager
-    
-    # CORS 配置 - 只允许一个 origin，避免重复
+    JWTManager(app)
+
     cors.init_app(
-        app, 
-        resources={r"/api/*": {"origins": "*"}}, 
-        supports_credentials=True,
+        app,
+        resources={r"/api/*": {"origins": "*"}},
+        supports_credentials=False,
         methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Requested-With"]
+        allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
     )
     
     # 创建数据库表
@@ -65,8 +58,8 @@ def create_app():
         with app.app_context():
             try:
                 RecurringService.process_recurring_schedules()
-            except Exception as e:
-                print(f"❌ 定时任务执行失败: {e}")
+            except Exception:
+                logger.exception("定时任务执行失败")
 
 
     scheduler.add_job(
@@ -83,11 +76,6 @@ def create_app():
     @app.route('/')
     def index():
         return jsonify({'message': 'SmartSchedule API is running!'})
-    
-    # 健康检查
-    @app.route('/health')
-    def health():
-        return jsonify({'status': 'healthy', 'database': 'connected'})
     
     # 健康检查
     @app.route('/health', methods=['GET'])

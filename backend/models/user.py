@@ -1,4 +1,3 @@
-# NEW_FILE_CODE
 from extensions import db
 from datetime import datetime
 

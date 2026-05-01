@@ -1,6 +1,4 @@
-# NEW_FILE_CODE
 from extensions import db
-from datetime import datetime
 
 class Schedule(db.Model):
     __tablename__ = 'schedule'

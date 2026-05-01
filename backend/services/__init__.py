@@ -1,4 +1,3 @@
-# NEW_FILE_CODE
 from .weather_service import get_weather_for_date, update_schedules_weather_for_user
 from .nlp_parser import parse_natural_language
 from .conflict_detector import detect_schedule_conflicts

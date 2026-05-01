@@ -1,4 +1,3 @@
-# NEW_FILE_CODE
 from .auth import auth_bp
 from .schedules import schedules_bp
 from .users import users_bp

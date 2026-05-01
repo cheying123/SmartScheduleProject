@@ -1,3 +1,4 @@
+import logging
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from services.user_behavior_analyzer import UserBehaviorAnalyzer
@@ -5,8 +6,9 @@ from services.ai_service import AIService
 from models.user import User
 from models.schedule import Schedule
 from extensions import db
-import traceback
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 analytics_bp = Blueprint('analytics', __name__, url_prefix='/api/analytics')
 
@@ -72,7 +74,7 @@ def get_daily_briefing():
         }), 200
         
     except Exception as e:
-        print(f"❌ 每日摘要生成失败: {str(e)}")
+        logger.exception("每日摘要生成失败")
         return jsonify({'error': str(e)}), 500
 
 @analytics_bp.route('/auto-schedule', methods=['POST'])
@@ -108,9 +110,7 @@ def auto_schedule_tasks():
         beijing_tz = timezone(td(hours=8))
         beijing_now = utc_now.replace(tzinfo=timezone.utc).astimezone(beijing_tz)
         
-        print(f"🕐 当前 UTC 时间: {utc_now}")
-        print(f"🕐 当前北京时间: {beijing_now}")
-        print(f"⏰ 工作时间偏好: {work_start_hour}:00 - {work_end_hour}:00")
+        logger.debug("当前 UTC 时间: %s, 北京时间: %s, 工作时间: %s:00-%s:00", utc_now, beijing_now, work_start_hour, work_end_hour)
         
         free_slots = []
         
@@ -136,9 +136,12 @@ def auto_schedule_tasks():
             day_start_utc = beijing_day_start.astimezone(timezone.utc).replace(tzinfo=None)
             day_end_utc = beijing_day_end.astimezone(timezone.utc).replace(tzinfo=None)
             
-            print(f"\n📅 第 {day_offset} 天:")
-            print(f"   北京: {beijing_day_start.strftime('%Y-%m-%d %H:%M')} - {beijing_day_end.strftime('%H:%M')}")
-            print(f"   UTC:  {day_start_utc.strftime('%Y-%m-%d %H:%M')} - {day_end_utc.strftime('%H:%M')}")
+            logger.debug("第 %d 天 - 北京: %s-%s, UTC: %s-%s",
+                         day_offset,
+                         beijing_day_start.strftime('%Y-%m-%d %H:%M'),
+                         beijing_day_end.strftime('%H:%M'),
+                         day_start_utc.strftime('%Y-%m-%d %H:%M'),
+                         day_end_utc.strftime('%H:%M'))
             
             # 查询该天已有的日程（使用 UTC 时间）
             existing_schedules = Schedule.query.filter(
@@ -217,7 +220,7 @@ def auto_schedule_tasks():
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ 自动排程失败: {str(e)}")
+        logger.exception("自动排程失败")
         return jsonify({'error': str(e)}), 500
 
 @analytics_bp.route('/productivity-hours', methods=['GET'])
@@ -226,15 +229,14 @@ def get_productivity_hours():
     """获取用户的高效工作时间段"""
     try:
         current_user_id = get_jwt_identity()
-        print(f"✅ Token 解析成功，用户 ID: {current_user_id}")
+        logger.debug("Token 解析成功，用户 ID: %s", current_user_id)
         
         days = request.args.get('days', 30, type=int)
         
         result = UserBehaviorAnalyzer.analyze_productivity_hours(current_user_id, days)
         return jsonify(result), 200
     except Exception as e:
-        print(f"❌ 错误详情：{str(e)}")
-        print(traceback.format_exc())
+        logger.exception("错误详情")
         return jsonify({'error': str(e)}), 500
 
 @analytics_bp.route('/weekly-pattern', methods=['GET'])
@@ -243,15 +245,14 @@ def get_weekly_pattern():
     """获取用户的周模式"""
     try:
         current_user_id = get_jwt_identity()
-        print(f"✅ Token 解析成功，用户 ID: {current_user_id}")
+        logger.debug("Token 解析成功，用户 ID: %s", current_user_id)
         
         weeks = request.args.get('weeks', 4, type=int)
         
         result = UserBehaviorAnalyzer.analyze_weekly_pattern(current_user_id, weeks)
         return jsonify(result), 200
     except Exception as e:
-        print(f"❌ 错误详情：{str(e)}")
-        print(traceback.format_exc())
+        logger.exception("错误详情")
         return jsonify({'error': str(e)}), 500
 
 @analytics_bp.route('/recommendations', methods=['GET'])
@@ -260,13 +261,12 @@ def get_recommendations():
     """获取个性化智能推荐"""
     try:
         current_user_id = get_jwt_identity()
-        print(f"✅ Token 解析成功，用户 ID: {current_user_id}")
+        logger.debug("Token 解析成功，用户 ID: %s", current_user_id)
         
         recommendations = UserBehaviorAnalyzer.generate_personalized_recommendations(current_user_id)
         return jsonify({'recommendations': recommendations}), 200
     except Exception as e:
-        print(f"❌ 错误详情：{str(e)}")
-        print(traceback.format_exc())
+        logger.exception("错误详情")
         return jsonify({'error': str(e)}), 500
 
 @analytics_bp.route('/statistics', methods=['GET'])
@@ -275,7 +275,7 @@ def get_full_statistics():
     """获取完整的用户行为统计"""
     try:
         current_user_id = get_jwt_identity()
-        print(f"✅ Token 解析成功，用户 ID: {current_user_id}")
+        logger.debug("Token 解析成功，用户 ID: %s", current_user_id)
         
         stats = {
             'productivity': UserBehaviorAnalyzer.analyze_productivity_hours(current_user_id),
@@ -287,8 +287,7 @@ def get_full_statistics():
         
         return jsonify(stats), 200
     except Exception as e:
-        print(f"❌ 错误详情：{str(e)}")
-        print(traceback.format_exc())
+        logger.exception("错误详情")
         return jsonify({'error': str(e)}), 500
 
 
@@ -505,6 +504,5 @@ def get_user_stats():
         }), 200
         
     except Exception as e:
-        print(f"❌ 获取统计数据失败: {str(e)}")
-        traceback.print_exc()
+        logger.exception("获取统计数据失败")
         return jsonify({'error': str(e)}), 500

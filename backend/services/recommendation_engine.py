@@ -1,8 +1,10 @@
-# NEW_FILE_CODE
+import logging
 from datetime import datetime, timedelta
 from collections import Counter
 from models.schedule import Schedule
 from services.weather_service import get_weather_with_alerts
+
+logger = logging.getLogger(__name__)
 
 def generate_schedule_recommendations(user_id):
     """
@@ -115,7 +117,7 @@ def generate_schedule_recommendations(user_id):
     consecutive_work_times = []
     sorted_schedules = sorted(user_schedules, key=lambda x: x.start_time)
     current_sequence = []
-    for i, schedule in enumerate(sorted_schedules):
+    for schedule in sorted_schedules:
         if current_sequence:
             # 如果当前日程与上一个日程间隔小于2小时，则认为是连续的
             prev_end_time = current_sequence[-1].start_time + timedelta(minutes=int(current_sequence[-1].duration or 60))
@@ -160,8 +162,6 @@ def generate_schedule_recommendations(user_id):
         if (s.start_time + timedelta(hours=8)).date() == tomorrow_beijing
     ]
     
-    # 尝试获取用户的城市位置信息
-    from app import db
     from models.user import User
     user = User.query.get(user_id)
     city_location_id = user.location if user and user.location else "101010100"  # 默认北京
@@ -177,7 +177,7 @@ def generate_schedule_recommendations(user_id):
             recommendations.extend(weather_advice)
             
     except Exception as e:
-        print(f"生成天气建议失败：{e}")
+        logger.warning("生成天气建议失败: %s", e)
         # 降级方案：如果有日程，给出通用提示
         if today_schedules or tomorrow_schedules:
             recommendations.append({

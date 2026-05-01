@@ -1,57 +1,32 @@
-from flask import current_app
 import re
+import logging
 from datetime import datetime, timedelta
 from config import Config
+from ai_parser import parse_with_ai as ai_parse
+
+logger = logging.getLogger(__name__)
 
 
 def parse_natural_language(text: str, timezone_offset: int = 480) -> dict:
-    """
-    解析自然语言指令，提取日程信息
-    
-    采用双层解析策略：
-    1. 优先使用 AI 解析（更智能，支持复杂语义）
-    2. AI 失败时使用规则解析（快速、可靠）
-    
-    Args:
-        text: 用户输入的文本
-        timezone_offset: 时区偏移量（分钟），默认 480（UTC+8）
-        
-    Returns:
-        解析后的日程信息字典
-    """
-    
-    # 第一层：尝试 AI 解析
     ai_result = _parse_with_ai(text, timezone_offset)
-    
+
     if ai_result:
-        print(f"✓ AI 解析成功")
+        logger.debug("AI 解析成功")
         ai_result['ai_parsed'] = True
         return ai_result
-    
-    # 第二层：AI 失败，使用规则解析
-    print("✗ AI 解析失败，使用传统规则解析")
+
+    logger.debug("AI 解析失败，使用传统规则解析")
     return _parse_with_rules(text, timezone_offset)
 
 
 def _parse_with_ai(text: str, timezone_offset_minutes: int = 480) -> dict:
-    """
-    使用 AI 解析自然语言文本
-    
-    Args:
-        text: 文本内容
-        timezone_offset_minutes: 时区偏移量（分钟）
-        
-    Returns:
-        AI 解析结果，失败返回 None
-    """
     if not Config.AI_API_KEY:
         return None
-    
+
     try:
-        from ai_parser import parse_with_ai as ai_parse
         return ai_parse(text, timezone_offset_minutes)
-    except Exception as e:
-        print(f"AI 解析异常：{e}")
+    except Exception:
+        logger.exception("AI 解析异常")
         return None
 
 

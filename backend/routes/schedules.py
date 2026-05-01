@@ -1,26 +1,18 @@
+import logging
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
-import traceback
 from extensions import db
 from models.schedule import Schedule
-from models.user import User
 from utils.jwt_utils import token_required
-from services.weather_service import get_weather_for_date, get_weather_with_alerts
+from services.weather_service import get_weather_with_alerts
 from services.nlp_parser import parse_natural_language
-from services.conflict_detector import detect_schedule_conflicts
-
-from services.weather_service import get_weather_for_date, get_weather_with_alerts
-from services.conflict_detector import detect_schedule_conflicts
+from services.conflict_detector import detect_schedule_conflicts, ConflictDetector
 from services.countdown_service import CountdownService
-from services.recurring_service import RecurringService  # ← 新增导入
 
-from services.conflict_detector import ConflictDetector
-
-# 将第三方库的导入移到前面
 from icalendar import Calendar, Event
 import pytz
-from sqlalchemy import or_, and_  # 添加SQLAlchemy逻辑操作符
-from flask_jwt_extended import jwt_required, get_jwt_identity  # 添加JWT相关函数
+from sqlalchemy import or_, and_
+logger = logging.getLogger(__name__)
 
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 
@@ -28,69 +20,59 @@ schedules_bp = Blueprint('schedules', __name__, url_prefix='/api/schedules')
 @schedules_bp.route('', methods=['GET'])
 @token_required
 def get_schedules(current_user):
-    """获取当前用户的所有日程，并自动更新天气信息，自动更新过期重复日程"""
+    """获取当前用户的所有日程，并自动更新天气信息"""
 
-    # ⚡ 核心改动：在返回数据前，先执行重复日程检查
-    try:
-        RecurringService.process_recurring_schedules()
-    except Exception as e:
-        print(f"⚠️ 自动更新重复日程失败: {e}")
-
-    from datetime import datetime, timedelta
-    
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.start_time.asc()).all()
-    
-    # 自动更新每个日程的天气信息（未来 7 天内）
-    today = datetime.now().strftime('%Y-%m-%d')
-    seven_days_later = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-    
+
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    seven_days_str = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+    city_location_id = current_user.location or "101010100"
+
+    # 收集未来 7 天内需要更新天气的唯一日期
+    dates_needing_weather = set()
+    for s in schedules:
+        d = s.start_time.strftime('%Y-%m-%d')
+        if today_str <= d <= seven_days_str and (not s.weather_info or '气温' not in s.weather_info):
+            dates_needing_weather.add(d)
+
+    # 每日期仅调用一次天气 API
+    weather_cache = {}
+    for d in dates_needing_weather:
+        try:
+            result = get_weather_with_alerts(city_location_id, d)
+            if result:
+                weather_cache[d] = result
+        except Exception:
+            pass
+
+    # 批量更新天气到数据库
+    if weather_cache:
+        for s in schedules:
+            d = s.start_time.strftime('%Y-%m-%d')
+            if d in weather_cache:
+                s.weather_info = weather_cache[d]['weather_text']
+
     schedule_list = []
-    
     for schedule in schedules:
         schedule_date = schedule.start_time.strftime('%Y-%m-%d')
-        
-        # 检查是否需要更新天气（未来 7 天内没有天气信息的日程）
-        needs_weather_update = (
-            today <= schedule_date <= seven_days_later and 
-            (not schedule.weather_info or '气温' not in schedule.weather_info)
-        )
-        
-        if needs_weather_update:
-            try:
-                city_location_id = current_user.location or "101010100"
-                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
-                if weather_result:
-                    schedule.weather_info = weather_result['weather_text']
-                    print(f"✓ 已更新 {schedule_date} 的天气：{weather_result['weather_text']}")
-                    if weather_result['alerts']:
-                        print(f"  生成 {len(weather_result['alerts'])} 条智能提醒")
-            except Exception as e:
-                print(f"✗ 更新天气失败 {schedule_date}: {e}")
-        
-        # 转换日程为字典格式
         schedule_dict = schedule.to_dict()
-        
-        # 附加天气提醒信息（如果在未来 7 天内且有提醒）
-        if today <= schedule_date <= seven_days_later:
-            try:
-                city_location_id = current_user.location or "101010100"
-                weather_result = get_weather_with_alerts(city_location_id, schedule_date)
-                if weather_result and weather_result['alerts']:
-                    schedule_dict['weather_alerts'] = weather_result['alerts']
-            except:
-                pass
-        
-        # 附加倒计时信息（新增）
+
+        # 附加天气提醒
+        if today_str <= schedule_date <= seven_days_str:
+            cached = weather_cache.get(schedule_date)
+            if cached and cached.get('alerts'):
+                schedule_dict['weather_alerts'] = cached['alerts']
+
+        # 附加倒计时信息
         try:
             countdown_info = CountdownService.get_countdown_info(schedule.start_time, 'standard')
             if countdown_info:
                 schedule_dict['countdown'] = countdown_info
-        except Exception as e:
-            print(f"✗ 生成倒计时失败：{e}")
-        
+        except Exception:
+            pass
+
         schedule_list.append(schedule_dict)
-    
-    # 提交天气信息更新
+
     db.session.commit()
     
     return jsonify(schedule_list)
@@ -189,12 +171,9 @@ def create_schedule(current_user):
                 if weather_result:
                     # 存储完整天气信息（包括提醒）
                     new_schedule.weather_info = weather_result['weather_text']
-                    print(f"✓ 更新天气成功：{schedule_date} (未来第{days_diff}天)")
-                    print(f"   天气：{weather_result['weather_text']}")
-                    if weather_result.get('alerts'):
-                        print(f"   提醒数量：{len(weather_result['alerts'])}")
+                    logger.info("更新天气成功: %s (未来第%d天), 天气: %s", schedule_date, days_diff, weather_result['weather_text'])
             except Exception as e:
-                print(f"✗ 更新天气失败 {schedule_date}: {e}")
+                logger.warning("更新天气失败 %s: %s", schedule_date, e)
         
         db.session.commit()
         return jsonify(new_schedule.to_dict()), 201
@@ -203,7 +182,6 @@ def create_schedule(current_user):
         return jsonify({'error': f'时间格式错误：{str(e)}'}), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
 
 @schedules_bp.route('/<int:id>', methods=['PUT'])
@@ -268,9 +246,9 @@ def update_schedule(current_user, id):
                     weather_result = get_weather_with_alerts(city_location_id, schedule_date)
                     if weather_result:
                         schedule.weather_info = weather_result['weather_text']
-                        print(f"✓ 更新天气成功：{schedule_date} (未来第{days_diff}天)")
+                        logger.info("更新天气成功: %s (未来第%d天)", schedule_date, days_diff)
                 except Exception as e:
-                    print(f"✗ 更新天气失败 {schedule_date}: {e}")
+                    logger.warning("更新天气失败 %s: %s", schedule_date, e)
         
         if 'title' in data:
             schedule.title = data['title']
@@ -392,11 +370,9 @@ def create_schedule_natural(current_user):
                 weather_result = get_weather_with_alerts(city_location_id, local_date)
                 if weather_result:
                     weather_info = weather_result['weather_text']
-                    print(f"✓ 自然语言创建 - 天气：{weather_result['weather_text']}")
-                    if weather_result.get('alerts'):
-                        print(f"   提醒数量：{len(weather_result['alerts'])}")
+                    logger.info("自然语言创建 - 天气: %s", weather_result['weather_text'])
             except Exception as e:
-                print(f"✗ 获取天气失败 {local_date}: {e}")
+                logger.warning("获取天气失败 %s: %s", local_date, e)
         
         new_schedule = Schedule(
             user_id=current_user.id,
@@ -551,9 +527,9 @@ def force_create_schedule(current_user):
                 weather_result = get_weather_with_alerts(city_location_id, schedule_date)
                 if weather_result:
                     new_schedule.weather_info = weather_result['weather_text']
-                    print(f"✓ 强制创建 - 更新天气成功：{schedule_date}")
+                    logger.info("强制创建 - 更新天气成功: %s", schedule_date)
             except Exception as e:
-                print(f"✗ 强制创建 - 更新天气失败 {schedule_date}: {e}")
+                logger.warning("强制创建 - 更新天气失败 %s: %s", schedule_date, e)
         
         db.session.commit()
         
@@ -567,9 +543,7 @@ def force_create_schedule(current_user):
         return jsonify({'error': f'时间格式错误：{str(e)}'}), 400
     except Exception as e:
         db.session.rollback()
-        print(f"❌ 强制创建失败：{str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("强制创建失败")
         return jsonify({'error': f'服务器内部错误：{str(e)}'}), 500
 
 
@@ -721,9 +695,8 @@ def export_schedules(current_user):
             'Content-Disposition': 'attachment; filename=schedules.ics'
         }
         
-    except Exception as e:
-        print(f"导出日程失败: {str(e)}")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("导出日程失败")
         return jsonify({'error': '导出日程失败'}), 500
 
 @schedules_bp.route('/import', methods=['POST'])
@@ -837,45 +810,43 @@ def import_schedules(current_user):
         return jsonify({'error': '文件编码错误，请确保文件是UTF-8编码'}), 400
     except ValueError as e:
         return jsonify({'error': f'iCalendar格式错误: {str(e)}'}), 400
-    except Exception as e:
-        print(f"导入日程失败: {str(e)}")
-        traceback.print_exc()
+    except Exception:
+        logger.exception("导入日程失败")
         return jsonify({'error': '导入日程失败'}), 500
 
 
 @schedules_bp.route('/query', methods=['POST'])
 @token_required
-def query_schedules():
-    """
-    通过自然语言查询日程
-    """
+def query_schedules(current_user):
+    """通过自然语言查询日程"""
     try:
         data = request.get_json()
         query_text = data.get('query', '').strip()
-        
+
         if not query_text:
             return jsonify({'error': '查询内容不能为空'}), 400
-        
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': '用户不存在'}), 404
+
+        user_id = current_user.id
             
         # 获取用户时区偏移量
         timezone_offset = data.get('timezone_offset', 480)  # 默认UTC+8
         user_timezone = pytz.FixedOffset(timezone_offset)
         utc_tz = pytz.UTC
         
-        # 解析查询文本，获取时间范围
-        start_date, end_date, query_description = parse_query_text(query_text, user_timezone)
-        
+        # 解析查询文本，获取时间范围和过滤条件
+        parsed = parse_query_text(query_text, user_timezone)
+        start_date = parsed['start_date']
+        end_date = parsed['end_date']
+        query_description = parsed['description']
+        content_keywords = parsed.get('content_keywords', [])
+
         if start_date is None or end_date is None:
             return jsonify({'error': '无法解析查询时间范围'}), 400
-            
+
         # 将本地时间转换为UTC时间进行查询
         utc_start = user_timezone.localize(start_date).astimezone(utc_tz)
         utc_end = user_timezone.localize(end_date).astimezone(utc_tz)
-        
+
         # 查询指定时间范围内的日程
         schedules = Schedule.query.filter(
             Schedule.user_id == user_id,
@@ -885,13 +856,24 @@ def query_schedules():
                 and_(Schedule.start_time <= utc_start, Schedule.end_time >= utc_end)
             )
         ).order_by(Schedule.start_time).all()
-        
+
+        # 内容关键词过滤
+        if content_keywords:
+            filtered = []
+            for sched in schedules:
+                title = (sched.title or '').lower()
+                content = (sched.content or '').lower()
+                combined = title + ' ' + content
+                if any(kw.lower() in combined for kw in content_keywords):
+                    filtered.append(sched)
+            schedules = filtered
+
         # 转换为本地时间并序列化
         serialized_schedules = []
         for sched in schedules:
             local_start = sched.start_time.replace(tzinfo=utc_tz).astimezone(user_timezone)
             local_end = sched.end_time.replace(tzinfo=utc_tz).astimezone(user_timezone) if sched.end_time else None
-            
+
             serialized_schedules.append({
                 'id': sched.id,
                 'title': sched.title,
@@ -900,14 +882,17 @@ def query_schedules():
                 'end_time': local_end.isoformat() if local_end else None,
                 'priority': sched.priority,
                 'is_completed': sched.is_completed,
+                'location': sched.location,
                 'created_at': sched.created_at.isoformat() if sched.created_at else None,
                 'is_recurring': sched.is_recurring,
                 'recurring_pattern': sched.recurring_pattern
             })
-        
+
         # 生成自然语言描述
-        response_text = generate_query_response(query_text, query_description, len(serialized_schedules), user_timezone)
-        
+        response_text = generate_query_response(
+            query_description, len(serialized_schedules), content_keywords
+        )
+
         return jsonify({
             'success': True,
             'data': {
@@ -918,71 +903,149 @@ def query_schedules():
         }), 200
         
     except Exception as e:
-        print(f"查询日程出错: {e}")
+        logger.exception("查询日程出错")
         return jsonify({'error': '查询失败，请稍后重试'}), 500
 
 
 def parse_query_text(query_text, user_timezone):
     """
-    解析查询文本，提取时间范围
+    解析查询文本，提取时间范围、时段和关键词
+
+    Returns:
+        dict: {
+            'start_date': datetime or None,
+            'end_date': datetime or None,
+            'description': str,
+            'time_of_day': 'morning'/'afternoon'/'evening' or None,
+            'content_keywords': [str]
+        }
     """
     from datetime import datetime, timedelta
     import re
-    
+
     now = datetime.now(user_timezone)
     start_date = None
     end_date = None
-    query_description = ""
-    
-    # 处理相对时间查询
-    if '今天' in query_text:
+    description = ""
+    time_of_day = None
+    content_keywords = []
+
+    # 时间关键词（用于从查询文本中提取内容关键词时排除）
+    time_keywords = {
+        '查询', '查看', '有没有', '什么时候', '哪些', '什么', '我的',
+        '今天', '明天', '后天', '昨天', '前天',
+        '下周', '本周', '上周', '本月', '下个月', '这个月', '上个月',
+        '周一', '周二', '周三', '周四', '周五', '周六', '周日', '星期天', '星期日',
+        '周末', '周天',
+        '上午', '下午', '晚上', '早上', '早晨', '中午', '傍晚', '夜间',
+        '日程', '安排', '计划',
+        # 虚词/停用词
+        '帮我', '一下', '能不能', '可以', '请', '给我', '我想', '我要', '帮我查',
+        '帮我查一下', '帮我查询', '查询一下',
+        '的', '了', '吗', '呢', '吧', '啊', '哦', '嗯', '啦',
+        '有', '在', '都', '就', '也', '还', '要', '想', '是', '和', '与',
+    }
+
+    # ── 时段检测 ──
+    morning_kw = ['上午', '早上', '早晨']
+    afternoon_kw = ['下午', '中午']
+    evening_kw = ['晚上', '傍晚', '夜间']
+
+    for kw in morning_kw:
+        if kw in query_text:
+            time_of_day = 'morning'
+            break
+    if not time_of_day:
+        for kw in afternoon_kw:
+            if kw in query_text:
+                time_of_day = 'afternoon'
+                break
+    if not time_of_day:
+        for kw in evening_kw:
+            if kw in query_text:
+                time_of_day = 'evening'
+                break
+
+    # ── 星期几检测 ──
+    weekday_map = {
+        '周一': 0, '周二': 1, '周三': 2, '周四': 3, '周五': 4, '周六': 5,
+        '周日': 6, '星期天': 6, '星期日': 6, '周天': 6,
+    }
+
+    matched_weekday = None
+    for kw, wd in weekday_map.items():
+        if kw in query_text:
+            matched_weekday = wd
+            break
+
+    # ── 周范围检测 ──
+    if '本周' in query_text or '这周' in query_text:
+        days_since_monday = now.weekday()
+        week_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if matched_weekday is not None:
+            # "本周三" → 定位到本周的特定一天
+            start_date = week_start + timedelta(days=matched_weekday)
+            end_date = start_date + timedelta(days=1)
+            day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+            description = f"本周{day_names[matched_weekday]}({start_date.strftime('%m月%d日')})"
+        else:
+            start_date = week_start
+            end_date = week_start + timedelta(weeks=1)
+            description = f"本周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
+    elif '下周' in query_text:
+        days_to_next_monday = 7 - now.weekday()
+        week_start = (now + timedelta(days=days_to_next_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if matched_weekday is not None:
+            start_date = week_start + timedelta(days=matched_weekday)
+            end_date = start_date + timedelta(days=1)
+            day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+            description = f"下周{day_names[matched_weekday]}({start_date.strftime('%m月%d日')})"
+        else:
+            start_date = week_start
+            end_date = week_start + timedelta(weeks=1)
+            description = f"下周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
+    elif '上周' in query_text:
+        days_since_last_monday = now.weekday() + 7
+        week_start = (now - timedelta(days=days_since_last_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if matched_weekday is not None:
+            start_date = week_start + timedelta(days=matched_weekday)
+            end_date = start_date + timedelta(days=1)
+            day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+            description = f"上周{day_names[matched_weekday]}({start_date.strftime('%m月%d日')})"
+        else:
+            start_date = week_start
+            end_date = week_start + timedelta(weeks=1)
+            description = f"上周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
+    # ── 相对日期检测 ──
+    elif '今天' in query_text:
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
-        query_description = f"今天({start_date.strftime('%m月%d日')})"
+        description = f"今天({start_date.strftime('%m月%d日')})"
     elif '明天' in query_text:
         start_date = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
-        query_description = f"明天({start_date.strftime('%m月%d日')})"
+        description = f"明天({start_date.strftime('%m月%d日')})"
     elif '后天' in query_text:
         start_date = (now + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
-        query_description = f"后天({start_date.strftime('%m月%d日')})"
+        description = f"后天({start_date.strftime('%m月%d日')})"
     elif '昨天' in query_text:
         start_date = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
-        query_description = f"昨天({start_date.strftime('%m月%d日')})"
+        description = f"昨天({start_date.strftime('%m月%d日')})"
     elif '前天' in query_text:
         start_date = (now - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
-        query_description = f"前天({start_date.strftime('%m月%d日')})"
-    elif '本周' in query_text or '这周' in query_text:
-        # 计算本周的开始（周一）
-        days_since_monday = now.weekday()
-        start_date = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = start_date + timedelta(weeks=1)
-        query_description = f"本周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
-    elif '下周' in query_text:
-        # 计算下周的开始（周一）
-        days_to_next_monday = 7 - now.weekday()
-        start_date = (now + timedelta(days=days_to_next_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = start_date + timedelta(weeks=1)
-        query_description = f"下周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
-    elif '上周' in query_text:
-        # 计算上周的开始（周一）
-        days_since_last_monday = now.weekday() + 7
-        start_date = (now - timedelta(days=days_since_last_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = start_date + timedelta(weeks=1)
-        query_description = f"上周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
+        description = f"前天({start_date.strftime('%m月%d日')})"
+    # ── 月范围检测 ──
     elif '本月' in query_text or '这个月' in query_text:
-        # 本月第一天和最后一天
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         if now.month == 12:
             end_date = now.replace(year=now.year+1, month=1, day=1)
         else:
             end_date = now.replace(month=now.month+1, day=1)
-        query_description = f"本月({start_date.strftime('%m月')})"
+        description = f"本月({start_date.strftime('%m月')})"
     elif '下个月' in query_text:
-        # 下个月第一天到最后一天
         if now.month == 12:
             next_month_start = now.replace(year=now.year+1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         else:
@@ -992,41 +1055,109 @@ def parse_query_text(query_text, user_timezone):
             end_date = next_month_start.replace(year=next_month_start.year+1, month=1, day=1)
         else:
             end_date = next_month_start.replace(month=next_month_start.month+1, day=1)
-        query_description = f"下个月({start_date.strftime('%m月')})"
+        description = f"下个月({start_date.strftime('%m月')})"
+    elif '上个月' in query_text:
+        if now.month == 1:
+            start_date = now.replace(year=now.year-1, month=12, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(month=now.month-1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        import calendar
+        last_day = calendar.monthrange(start_date.year, start_date.month)[1]
+        end_date = start_date.replace(day=last_day) + timedelta(days=1)
+        description = f"上个月({start_date.strftime('%Y年%m月')})"
+    # ── 指定月份："4月"、"12月"等（但不匹配"4月5日"这种具体日期）──
+    elif re.search(r'(\d{1,2})月', query_text) and not re.search(r'(\d{1,2})月(\d{1,2})日', query_text):
+        month_match = re.search(r'(\d{1,2})月', query_text)
+        month = int(month_match.group(1))
+        if month < 1 or month > 12:
+            month = now.month
+        year = now.year
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        start_date = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_date = start_date.replace(day=last_day) + timedelta(days=1)
+        description = f"{year}年{month}月"
+    # ── 仅星期几（无周修饰）→ 默认定位到本周 ──
+    elif matched_weekday is not None:
+        days_since_monday = now.weekday()
+        week_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = week_start + timedelta(days=matched_weekday)
+        end_date = start_date + timedelta(days=1)
+        day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+        description = f"本周{day_names[matched_weekday]}({start_date.strftime('%m月%d日')})"
+    # ── 具体日期匹配 ──
     else:
-        # 尝试匹配具体日期，如"12月25日"或"2023-12-25"
         date_match = re.search(r'(\d{1,2})月(\d{1,2})日', query_text)
         if date_match:
             month = int(date_match.group(1))
             day = int(date_match.group(2))
             year = now.year
-            # 如果月份小于当前月份，认为是下一年的日期
             if month < now.month:
                 year += 1
             start_date = now.replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
             end_date = start_date + timedelta(days=1)
-            query_description = f"{start_date.strftime('%Y年%m月%d日')}"
+            description = f"{start_date.strftime('%Y年%m月%d日')}"
         else:
-            # 尝试匹配ISO格式日期
             iso_date_match = re.search(r'(\d{4}-\d{2}-\d{2})', query_text)
             if iso_date_match:
                 date_str = iso_date_match.group(1)
                 parsed_date = datetime.strptime(date_str, '%Y-%m-%d')
                 start_date = user_timezone.localize(parsed_date).replace(hour=0, minute=0, second=0, microsecond=0)
                 end_date = start_date + timedelta(days=1)
-                query_description = f"{start_date.strftime('%Y年%m月%d日')}"
+                description = f"{start_date.strftime('%Y年%m月%d日')}"
 
-    return start_date, end_date, query_description
+    # ── 兜底：无时间关键词时，默认查询本周 ──
+    if start_date is None or end_date is None:
+        days_since_monday = now.weekday()
+        start_date = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = start_date + timedelta(weeks=1)
+        description = f"本周({start_date.strftime('%m月%d日')} - {end_date.strftime('%m月%d日')})"
+
+    # ── 时段过滤应用于日期范围 ──
+    if time_of_day == 'morning':
+        start_date = start_date.replace(hour=6, minute=0, second=0, microsecond=0) if start_date.hour == 0 else start_date
+        end_date = start_date + timedelta(hours=6) if end_date.hour == 0 else end_date
+        description += ' 上午'
+    elif time_of_day == 'afternoon':
+        start_date = start_date.replace(hour=12, minute=0, second=0, microsecond=0) if start_date.hour == 0 else start_date
+        end_date = start_date + timedelta(hours=6) if end_date.hour == 0 else end_date
+        description += ' 下午'
+    elif time_of_day == 'evening':
+        start_date = start_date.replace(hour=18, minute=0, second=0, microsecond=0) if start_date.hour == 0 else start_date
+        end_date = start_date + timedelta(hours=6) if end_date.hour == 0 else end_date
+        description += ' 晚上'
+
+    # ── 内容关键词提取 ──
+    # 移除所有时间关键词后，剩余的非停用词作为内容过滤关键词
+    cleaned = query_text
+    for kw in sorted(time_keywords, key=len, reverse=True):
+        cleaned = cleaned.replace(kw, '')
+    # 提取长度>=2的中文词或英文词
+    content_matches = re.findall(r'[一-鿿]{2,}|[a-zA-Z]{2,}', cleaned)
+    content_keywords = [w for w in content_matches if len(w) >= 2]
+
+    return {
+        'start_date': start_date.replace(tzinfo=None) if start_date else None,
+        'end_date': end_date.replace(tzinfo=None) if end_date else None,
+        'description': description,
+        'time_of_day': time_of_day,
+        'content_keywords': content_keywords,
+    }
 
 
-def generate_query_response(query_text, query_description, count, user_timezone):
-    """
-    生成查询响应的自然语言描述
-    """
+def generate_query_response(query_description, count, content_keywords=None):
+    """生成查询响应的自然语言描述"""
+    keyword_hint = ""
+    if content_keywords:
+        keyword_hint = f"（关键词：{'、'.join(content_keywords)}）"
+
     if count == 0:
-        return f"在{query_description}没有找到相关日程。"
+        msg = f"在{query_description}没有找到相关日程"
+        if content_keywords:
+            msg += keyword_hint
+        return msg
     elif count == 1:
-        return f"在{query_description}找到1个日程。"
+        return f"在{query_description}{keyword_hint}找到1个日程"
     else:
-        return f"在{query_description}找到{count}个日程。"
+        return f"在{query_description}{keyword_hint}找到{count}个日程"
 

@@ -6,8 +6,7 @@
 import { ref, onUnmounted } from 'vue'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
-// import { VOICE_RECOGNITION, GEOLOCATION_OPTIONS } from '@/constants' // Removed unused imports if not needed elsewhere, but keeping structure clean
-// import { formatRecordingTime } from '@/utils/timeUtils'
+import { QUERY_KEYWORDS } from '@/constants'
 
 /**
  * 自然语言输入组合式函数
@@ -190,9 +189,12 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript
       naturalLanguageInput.value = transcript
-      
-      // 停止录音
+
       stopRecording()
+
+      if (isQueryIntent(transcript) && onVoiceQueryCallback) {
+        onVoiceQueryCallback(transcript)
+      }
     }
     
     recognition.onerror = (event) => {
@@ -241,15 +243,25 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     isNaturalLanguageMode.value = false
   }
 
+  // 语音识别完成后的查询回调
+  let onVoiceQueryCallback = null
+
   /**
    * 简单的指令识别（用于区分是"查询"还是"创建"）
-   * @param {string} text 
+   * @param {string} text
    * @returns {boolean} - 是否为查询指令
    */
   function isQueryIntent(text) {
-    if (!text) return false;
-    const queryKeywords = ['查询', '查看', '有没有', '什么时候', '今天', '明天', '后天', '昨天', '前天', '下周', '本周', '上周', '本月', '下个月'];
-    return queryKeywords.some(keyword => text.includes(keyword));
+    if (!text) return false
+    return QUERY_KEYWORDS.some(keyword => text.includes(keyword))
+  }
+
+  /**
+   * 设置语音识别完成后的查询回调
+   * @param {Function} callback - 当语音识别结果为查询意图时调用
+   */
+  function setVoiceQueryCallback(callback) {
+    onVoiceQueryCallback = callback
   }
 
   onUnmounted(() => {
@@ -273,6 +285,7 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
     stopRecording,
     handleCancelClick,
     isQueryIntent,
+    setVoiceQueryCallback,
     speak
   }
 }

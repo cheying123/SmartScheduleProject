@@ -235,13 +235,18 @@ const {
   isRecording,
   recordingDuration,
   parseAndCreate,
-  queryExistingSchedules,  // 新增查询函数
+  queryExistingSchedules,
   startVoiceInput,
   stopRecording,
   handleCancelClick,
   isQueryIntent,
-  speak  // 引入语音函数
+  setVoiceQueryCallback,
+  speak
 } = useNaturalLanguage(API_URL, fetchSchedules)
+
+// 查询结果状态
+const queryResult = ref(null)
+const isResultCollapsed = ref(false)
 
 // ✅ 新增：定义本地播报函数，解决模板中找不到 speak 的问题
 function handleSpeak(text) {
@@ -252,6 +257,63 @@ function handleSpeak(text) {
     window.speechSynthesis.speak(utterance)
   } else {
     alert('您的浏览器不支持语音播报')
+  }
+}
+
+/**
+ * 处理"创建日程"按钮点击
+ * 直接通过自然语言创建日程（无需手动填写表单）
+ */
+async function handleNaturalLanguageSubmit() {
+  console.log('✨ 开始通过自然语言创建日程...')
+
+  if (!naturalLanguageInput.value.trim()) {
+    showNotification('error', '❌ 请输入日程描述')
+    return
+  }
+
+  const timezoneInfo = getTimezoneInfo()
+  const timezoneOffset = timezoneInfo.offset
+
+  try {
+    isProcessingNL.value = true
+
+    const response = await axios.post(
+      `${API_URL}/schedules/natural-language`,
+      {
+        text: naturalLanguageInput.value,
+        timezone_offset: timezoneOffset
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${userStore.token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    const scheduleData = response.data
+
+    if (scheduleData.conflicts) {
+      // 有冲突，显示冲突对话框
+      conflictDialog.value = {
+        parsed_data: scheduleData.schedule || scheduleData,
+        conflicts: scheduleData.conflicts,
+        suggestions: scheduleData.suggestions
+      }
+      showNotification('warning', '⚠️ 检测到时间冲突，请处理')
+    } else {
+      // 成功创建
+      showNotification('success', `✅ 已创建日程：${scheduleData.schedule?.title || scheduleData.title}`)
+      naturalLanguageInput.value = ''
+      await fetchSchedules()
+    }
+  } catch (err) {
+    console.error('自然语言创建失败:', err)
+    const errMsg = err.response?.data?.error || '创建失败，请稍后重试'
+    showNotification('error', `❌ ${errMsg}`)
+  } finally {
+    isProcessingNL.value = false
   }
 }
 
@@ -313,22 +375,20 @@ async function handleParseAndFill() {
  */
 async function handleQuerySchedules() {
   console.log('🔍 开始查询日程...')
-  
-  // 获取时区偏移量
+
   const timezoneInfo = getTimezoneInfo()
   const timezoneOffset = timezoneInfo.offset
-  
+
   try {
     isProcessingNL.value = true
-    
+    queryResult.value = null
+
     const result = await queryExistingSchedules(naturalLanguageInput.value, timezoneOffset)
-    
+
     if (result.success) {
-      console.log('✅ 查询成功:', result.data)
-      // 注意：查询结果现在会在NaturalLanguageInput组件中显示
-      showNotification('success', `✅ ${result.data.response}`)
+      queryResult.value = result.data
+      isResultCollapsed.value = false
     } else {
-      console.error('❌ 查询失败:', result.error)
       showNotification('error', `❌ ${result.error}`)
     }
   } catch (err) {
@@ -337,6 +397,43 @@ async function handleQuerySchedules() {
   } finally {
     isProcessingNL.value = false
   }
+}
+
+// 从查询结果中编辑日程
+function handleQueryResultEdit(schedule) {
+  openEditModal(schedule)
+}
+
+// 从查询结果中删除日程
+async function handleQueryResultDelete(scheduleId) {
+  await deleteSchedule(scheduleId)
+  // 从查询结果中移除该项
+  if (queryResult.value?.schedules) {
+    queryResult.value = {
+      ...queryResult.value,
+      schedules: queryResult.value.schedules.filter(s => s.id !== scheduleId)
+    }
+  }
+}
+
+// 从查询结果中标记完成
+async function handleQueryResultComplete(scheduleId) {
+  await markScheduleComplete(scheduleId)
+  // 更新查询结果中的状态
+  if (queryResult.value?.schedules) {
+    queryResult.value = {
+      ...queryResult.value,
+      schedules: queryResult.value.schedules.map(s =>
+        s.id === scheduleId ? { ...s, is_completed: !s.is_completed } : s
+      )
+    }
+  }
+}
+
+function formatShortTime(timeStr) {
+  if (!timeStr) return ''
+  const d = new Date(timeStr)
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 // 强制创建日程（忽略冲突）
@@ -369,12 +466,22 @@ async function forceCreateSchedule() {
     
     // 显示成功通知
     showNotification('success', '✅ 日程已创建（已忽略冲突）！')
-    
+
   } catch (error) {
     console.error('强制创建失败:', error)
     const errorMsg = error.response?.data?.error || '创建失败，请重试'
     showNotification('error', `❌ ${errorMsg}`)
   }
+}
+
+// 采纳 AI 建议的时间段
+async function handleApplySuggestion(suggestion) {
+  if (!conflictDialog.value?.parsed_data || !suggestion) return
+  // 更新为新建议的时间
+  conflictDialog.value.parsed_data.start_time = suggestion.start_time
+  conflictDialog.value.parsed_data.end_time = suggestion.end_time
+  // 重新尝试创建
+  await forceCreateSchedule()
 }
 
 const {
@@ -568,17 +675,6 @@ const groupedSchedules = computed(() => {
   return groups
 })
 
-// 新增：智能推荐计算属性
-const smartRecommendationsFiltered = computed(() => {
-  if (!smartRecommendations.value) return []
-  return smartRecommendations.value.filter(r => 
-    r.type === 'time_preference' || 
-    r.type === 'balance' || 
-    r.type === 'weather' || 
-    r.type === 'info'
-  )
-})
-
 // 方法
 function getTabTitle() {
   if (activeTab.value === 'recommendations') {
@@ -740,6 +836,11 @@ onMounted(async () => {
   
   fetchSchedules()
   loadRecommendations()
+
+  // 设置语音识别查询回调：语音输入后若检测到查询意图，自动触发查询
+  setVoiceQueryCallback(() => {
+    handleQuerySchedules()
+  })
 })
 
 
@@ -899,22 +1000,75 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- 弹窗：自然语言输入 -->
+    <!-- 弹窗：自然语言输入 + 查询结果（优化：等高、无缝、可折叠） -->
     <transition name="fade">
-      <div v-if="isNaturalLanguageMode && createMode === 'natural'" class="form-overlay" @click.self="isNaturalLanguageMode = false">
-        <NaturalLanguageInput
-          :input-value="naturalLanguageInput"
-          :is-processing="isProcessingNL"
-          :is-recording="isRecording"
-          :recording-duration="recordingDuration"
-          :is-ai-processing="isAIProcessing"
-          @submit="handleNaturalLanguageSubmit"
-          @parse-and-fill="handleParseAndFill"
-          @cancel="handleCancelClick"
-          @switch-mode="openCreateForm"
-          @voice-input="startVoiceInput"
-          @update:input-value="naturalLanguageInput = $event"
-        />
+      <div v-if="isNaturalLanguageMode && createMode === 'natural'" class="form-overlay" @click.self="isNaturalLanguageMode = false; queryResult = null; isResultCollapsed = false">
+        <div class="nl-layout" :class="{ 'has-results': queryResult && !isResultCollapsed }">
+          <div class="nl-left">
+            <NaturalLanguageInput
+              :input-value="naturalLanguageInput"
+              :is-processing="isProcessingNL"
+              :is-recording="isRecording"
+              :recording-duration="recordingDuration"
+              :is-ai-processing="isAIProcessing"
+              @submit="handleNaturalLanguageSubmit"
+              @parse-and-fill="handleParseAndFill"
+              @cancel="handleCancelClick"
+              @switch-mode="openCreateForm"
+              @voice-input="startVoiceInput"
+              @query-schedules="handleQuerySchedules"
+              @update:input-value="naturalLanguageInput = $event"
+            />
+          </div>
+
+          <!-- 展开按钮（结果收起时显示在左侧面板右边缘） -->
+          <button
+            v-if="queryResult && isResultCollapsed"
+            class="nl-expand-btn"
+            @click="isResultCollapsed = false"
+            title="展开结果面板"
+          >◀</button>
+
+          <div class="nl-right">
+            <div v-if="queryResult" class="query-panel-inline">
+              <div class="qp-header">
+                <div class="qp-header-left">
+                  <span>📋</span>
+                  <strong>{{ queryResult.query_description }}</strong>
+                  <span class="qp-count">{{ queryResult.schedules?.length || 0 }}个</span>
+                </div>
+                <div class="qp-header-actions">
+                  <button class="qp-fold" @click="isResultCollapsed = true" title="收起结果面板">━</button>
+                  <button class="qp-close" @click="queryResult = null" title="关闭面板">×</button>
+                </div>
+              </div>
+              <div class="qp-summary" v-if="queryResult.response">
+                {{ queryResult.response }}
+              </div>
+              <div class="qp-list" v-if="queryResult.schedules?.length">
+                <div
+                  v-for="s in queryResult.schedules" :key="s.id"
+                  class="qp-row" :class="{ done: s.is_completed }"
+                >
+                  <span class="qp-dot" :class="`p${s.priority}`"></span>
+                  <div class="qp-info">
+                    <span class="qp-title">{{ s.title }}</span>
+                    <span class="qp-time">
+                      <Clock :size="11" /> {{ formatShortTime(s.start_time) }}
+                      <template v-if="s.location"> · {{ s.location }}</template>
+                    </span>
+                  </div>
+                  <div class="qp-actions">
+                    <button v-if="!s.is_completed" class="qp-act" @click="handleQueryResultComplete(s.id)" title="完成">✓</button>
+                    <button class="qp-act" @click="handleQueryResultEdit(s)" title="编辑">✎</button>
+                    <button class="qp-act qp-del" @click="handleQueryResultDelete(s.id)" title="删除">✕</button>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="qp-empty">📭 没有找到符合条件的日程</div>
+            </div>
+          </div>
+        </div>
       </div>
     </transition>
 
@@ -972,11 +1126,12 @@ onUnmounted(() => {
 
      <!-- 冲突解决对话框 -->
     <transition name="fade">
-      <div v-if="conflictDialogVisible" class="form-overlay" @click.self="conflictDialogVisible = false">
+      <div v-if="conflictDialog" class="form-overlay" @click.self="conflictDialog = null">
         <ConflictDialog
-          :conflict-info="conflictInfo"
-          @resolve="handleResolveConflict"
-          @cancel="conflictDialogVisible = false"
+          :conflict-data="conflictDialog"
+          @confirm="forceCreateSchedule"
+          @apply-suggestion="handleApplySuggestion"
+          @cancel="conflictDialog = null"
         />
       </div>
     </transition>
@@ -1416,7 +1571,6 @@ onUnmounted(() => {
   border-radius: 12px;
   box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
   width: 100%;
-  max-width: 500px;
 }
 
 .form-container h2 {
@@ -1919,5 +2073,339 @@ onUnmounted(() => {
 
 .fab-menu-item .menu-icon {
   font-size: 1.2rem;
+}
+
+/* ═══════════════════════════════════
+   NL 输入 + 查询结果 并排布局
+   ═══════════════════════════════════ */
+.nl-layout {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  position: relative;
+}
+
+.nl-left {
+  width: 600px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nl-right {
+  width: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: width 0.25s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.nl-layout.has-results {
+  overflow-x: auto;
+}
+
+.nl-layout.has-results .nl-right {
+  position: absolute;
+  top: 0;
+  left: calc(50% + 300px);
+  width: 400px;
+  height: 100%;
+  border-left: 1px solid #e8ecf1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 有结果时，左侧面板右侧变为直角，与结果面板无缝拼接 */
+.nl-layout.has-results .nl-left :deep(.form-container) {
+  border-radius: 12px 0 0 12px;
+  border-right: none;
+  box-shadow: -4px 4px 6px rgba(50, 50, 93, 0.11), -1px 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 展开按钮（结果收起时出现在左侧面板右边缘） */
+.nl-expand-btn {
+  position: absolute;
+  left: calc(50% + 300px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 52px;
+  border: 1px solid #e8ecf1;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: #fff;
+  color: #94a3b8;
+  font-size: 10px;
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.nl-expand-btn:hover {
+  background: #f0f4ff;
+  color: #5e72e4;
+  border-color: #c7d2fe;
+}
+
+.query-panel-inline {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  border-radius: 0 12px 12px 0;
+  border: 1px solid #e8ecf1;
+  border-left: none;
+  box-shadow: 4px 4px 6px rgba(50, 50, 93, 0.11), 1px 1px 3px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 面板头部 ── */
+.qp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.125rem;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border-bottom: 1px solid #eef1f6;
+  flex-shrink: 0;
+}
+
+.qp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #32325d;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.qp-header-left strong {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qp-count {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #5e72e4;
+  background: #eef2ff;
+  padding: 0.12rem 0.5rem;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.qp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.qp-fold {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 1rem;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.qp-fold:hover {
+  background: #f0f4ff;
+  border-color: #c7d2fe;
+  color: #5e72e4;
+}
+
+.qp-close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.qp-close:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #ef4444;
+}
+
+/* ── 摘要行 ── */
+.qp-summary {
+  padding: 0.5rem 1.125rem;
+  font-size: 0.78rem;
+  color: #3b82f6;
+  background: #f8faff;
+  border-bottom: 1px solid #eef1f6;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* ── 列表区 ── */
+.qp-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.qp-list::-webkit-scrollbar { width: 4px; }
+.qp-list::-webkit-scrollbar-track { background: transparent; }
+.qp-list::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+
+.qp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.625rem;
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+
+.qp-row + .qp-row {
+  border-top: 1px solid #f8fafc;
+}
+
+.qp-row:hover { background: #f8fafd; }
+.qp-row.done { opacity: 0.45; }
+.qp-row.done:hover { opacity: 0.7; }
+
+/* 优先级圆点 */
+.qp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #94a3b8;
+  box-shadow: 0 0 0 2px #f1f5f9;
+}
+
+.qp-dot.p2 { background: #f59e0b; box-shadow: 0 0 0 2px #fef3c7; }
+.qp-dot.p3 { background: #ef4444; box-shadow: 0 0 0 2px #fee2e2; }
+
+/* 信息区 */
+.qp-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.qp-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qp-time {
+  font-size: 0.73rem;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* 操作按钮 */
+.qp-actions {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.qp-row:hover .qp-actions { opacity: 1; }
+
+.qp-act {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+
+.qp-act:hover { color: #5e72e4; background: #eef2ff; }
+.qp-act.qp-del:hover { color: #dc2626; background: #fef2f2; }
+
+/* 空状态 */
+.qp-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 900px) {
+  .nl-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+  .nl-left {
+    width: 100%;
+    max-width: 600px;
+    flex: 0 0 auto;
+  }
+  .nl-expand-btn {
+    display: none;
+  }
+  .nl-layout.has-results .nl-right {
+    position: static;
+    width: 100%;
+    max-width: 600px;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid #e8ecf1;
+    padding-top: 0.75rem;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+  .nl-layout.has-results .nl-left :deep(.form-container) {
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  .nl-layout.has-results .query-panel-inline {
+    border-radius: 12px;
+    border: 1px solid #e8ecf1;
+  }
 }
 </style>

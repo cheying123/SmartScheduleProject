@@ -1,4 +1,3 @@
-# NEW_FILE_CODE
 import jwt
 import datetime
 from config import Config

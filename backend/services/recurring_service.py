@@ -36,7 +36,7 @@ class RecurringService:
             next_start = None
             duration = schedule.end_time - schedule.start_time if schedule.end_time else timedelta(hours=1)
             
-            # 循环直到找到未来的时间（防止跨度很大的重复，比如每月31号）
+            # 循环直到找到未来的时间
             while True:
                 if schedule.recurring_pattern == 'daily':
                     next_start = schedule.start_time + timedelta(days=1)
@@ -48,18 +48,16 @@ class RecurringService:
                     if month > 12:
                         month = 1
                         year += 1
-                    try:
-                        next_start = schedule.start_time.replace(year=year, month=month)
-                    except ValueError:
-                        # 如果下个月没有这一天（如31号），则跳到下下个月
-                        schedule.start_time = next_start if next_start else schedule.start_time + timedelta(days=32)
-                        continue
-                
+                    import calendar
+                    last_day = calendar.monthrange(year, month)[1]
+                    day = min(schedule.start_time.day, last_day)
+                    next_start = schedule.start_time.replace(year=year, month=month, day=day)
+
                 if next_start and next_start > now:
                     break
-                
-                # 如果算出来的下次时间还是过去，继续往后推（针对 daily/weekly）
-                schedule.start_time = next_start
+
+                # 如果算出来的下次时间还是过去，继续往后推
+                schedule.start_time = next_start if next_start else schedule.start_time + timedelta(days=32)
 
             if next_start:
                 next_end = next_start + duration
