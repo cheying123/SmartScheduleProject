@@ -1004,7 +1004,7 @@ onUnmounted(() => {
     <!-- 弹窗：自然语言输入 + 查询结果（优化：等高、无缝、可折叠） -->
     <transition name="fade">
       <div v-if="isNaturalLanguageMode && createMode === 'natural'" class="form-overlay" @click.self="isNaturalLanguageMode = false; queryResult = null; isResultCollapsed = false">
-        <div class="nl-layout" :class="{ 'has-results': queryResult && !isResultCollapsed }">
+        <div class="nl-layout" :class="{ 'has-results': !!queryResult, 'results-expanded': queryResult && !isResultCollapsed }">
           <div class="nl-left">
             <NaturalLanguageInput
               :input-value="naturalLanguageInput"
@@ -2108,16 +2108,22 @@ onUnmounted(() => {
   overflow-x: auto;
 }
 
+/* 有结果时右侧面板始终绝对定位，匹配左侧高度，保持布局稳定 */
 .nl-layout.has-results .nl-right {
   position: absolute;
   top: 0;
   left: calc(50% + 300px);
-  width: 400px;
   height: 100%;
-  border-left: 1px solid #e8ecf1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border: none;
+}
+
+/* 展开时显示 400px 宽度 */
+.nl-layout.results-expanded .nl-right {
+  width: 400px;
+  border-left: 1px solid #e8ecf1;
 }
 
 /* 有结果时，左侧面板右侧变为直角，与结果面板无缝拼接 */
