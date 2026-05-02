@@ -529,15 +529,19 @@ onUnmounted(() => {
             <div class="day-number">{{ dayObj.date.getDate() }}</div>
             
             <div v-if="getSchedulesForDate(dayObj.date).length > 0" class="mini-schedule-list">
-              <div 
-                v-for="schedule in getSchedulesForDate(dayObj.date).slice(0, 3)" 
+              <div
+                v-for="schedule in getSchedulesForDate(dayObj.date).slice(0, 3)"
                 :key="schedule.id"
                 class="mini-schedule-item"
+                :class="{ 'is-completed': schedule.is_completed }"
                 :style="{ borderLeftColor: getPriorityColor(schedule.priority) }"
-                :title="`${schedule.title}\n${formatTime(schedule.start_time)}`"
+                :title="`${schedule.is_completed ? '✓ ' : ''}${schedule.title}\n${formatTime(schedule.start_time)}`"
               >
                 <span class="mini-time">{{ formatTime(schedule.start_time) }}</span>
-                <span class="mini-title">{{ schedule.title }}</span>
+                <span class="mini-title">
+                  <span v-if="schedule.is_completed" class="mini-check">✓</span>
+                  {{ schedule.title }}
+                </span>
               </div>
               <div v-if="getSchedulesForDate(dayObj.date).length > 3" class="more-indicator">
                 +{{ getSchedulesForDate(dayObj.date).length - 3 }} 更多
@@ -580,12 +584,13 @@ onUnmounted(() => {
             </div>
             
             <div v-else class="schedule-list">
-              <div 
-                v-for="schedule in getSchedulesForDate(selectedDate)" 
+              <div
+                v-for="schedule in getSchedulesForDate(selectedDate)"
                 :key="schedule.id"
                 class="schedule-card"
-                :class="`priority-${schedule.priority}`"
+                :class="[`priority-${schedule.priority}`, { completed: schedule.is_completed }]"
               >
+                <div v-if="schedule.is_completed" class="completed-badge">✓</div>
                 <div class="card-left">
                   <div class="time-section">
                     <Clock :size="16" />
@@ -1318,6 +1323,23 @@ onUnmounted(() => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+/* 已完成迷你日程 - 绿色背景 */
+.mini-schedule-item.is-completed {
+  background: #f6ffed;
+  opacity: 0.85;
+}
+
+.mini-schedule-item.is-completed .mini-title {
+  color: #52c41a;
+}
+
+.mini-check {
+  color: #52c41a;
+  font-weight: 700;
+  margin-right: 2px;
+  font-size: 0.7rem;
+}
+
 .mini-time {
   font-weight: 600;
   color: #4a5568;
@@ -1530,6 +1552,36 @@ onUnmounted(() => {
   border-color: #667eea;
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
   transform: translateX(4px);
+}
+
+/* 已完成日程卡片 - 绿色边框 */
+.schedule-card.completed {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+
+.schedule-card.completed::before {
+  background: linear-gradient(to bottom, #52c41a, #73d13d);
+}
+
+/* 已完成对号徽章 */
+.completed-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  background: #52c41a;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(82, 196, 26, 0.3);
+  z-index: 1;
+  pointer-events: none;
 }
 
 .card-left {

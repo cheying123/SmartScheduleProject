@@ -419,7 +419,15 @@ async function handleQueryResultDelete(scheduleId) {
 
 // 从查询结果中标记完成
 async function handleQueryResultComplete(scheduleId) {
-  await markScheduleComplete(scheduleId)
+  const schedule = schedules.value.find(s => s.id === scheduleId)
+  const wasCompleted = schedule?.is_completed ?? false
+
+  // 乐观更新
+  if (schedule) {
+    schedules.value = schedules.value.map(s =>
+      s.id === scheduleId ? { ...s, is_completed: !wasCompleted } : s
+    )
+  }
   // 更新查询结果中的状态
   if (queryResult.value?.schedules) {
     queryResult.value = {
@@ -428,6 +436,27 @@ async function handleQueryResultComplete(scheduleId) {
         s.id === scheduleId ? { ...s, is_completed: !s.is_completed } : s
       )
     }
+  }
+
+  await markScheduleComplete(scheduleId)
+  if (statsPanel.value) statsPanel.value.fetchStats()
+
+  showNotification('success', wasCompleted ? '⏪ 已取消完成' : '✅ 已完成')
+}
+
+// 标记完成/取消完成，刷新统计面板
+async function handleScheduleComplete(id) {
+  const success = await markScheduleComplete(id)
+  if (success) {
+    if (statsPanel.value) statsPanel.value.fetchStats()
+    
+    // 获取更新后的日程项以显示正确消息
+    const updatedSchedule = schedules.value.find(s => s.id === id)
+    if (updatedSchedule) {
+      showNotification('success', updatedSchedule.is_completed ? '✅ 已完成' : '⏪ 已取消完成')
+    }
+  } else {
+    showNotification('error', '更新状态失败')
   }
 }
 
@@ -574,7 +603,7 @@ function getNotificationColor(type) {
 // 计算属性
 const filteredSchedules = computed(() => {
   if (!searchQuery.value.trim()) {
-    return schedules.value
+    return [...schedules.value]
   }
   
   const query = searchQuery.value.toLowerCase().trim()
@@ -599,37 +628,112 @@ const filteredSchedules = computed(() => {
   )
 })
 
+// 计算循环日程的下一次发生时间
+function getNextOccurrence(startTime, endTime, pattern) {
+  if (!pattern) return { start_time: startTime, end_time: endTime }
+
+  const now = new Date()
+  const start = new Date(startTime)
+  const end = endTime ? new Date(endTime) : new Date(start.getTime() + 60 * 60 * 1000)
+
+  // 当前实例尚未结束，无需计算下次
+  if (end > now) return { start_time: startTime, end_time: endTime }
+
+  let newStart = new Date(start)
+  let newEnd = new Date(end)
+
+  const advance = (fn) => {
+    while (newEnd <= now) {
+      fn(newStart)
+      fn(newEnd)
+    }
+  }
+
+  switch (pattern) {
+    case 'daily':
+      advance(d => d.setDate(d.getDate() + 1))
+      break
+    case 'weekly':
+      advance(d => d.setDate(d.getDate() + 7))
+      break
+    case 'monthly':
+      advance(d => d.setMonth(d.getMonth() + 1))
+      break
+    default:
+      return { start_time: startTime, end_time: endTime }
+  }
+
+  return {
+    start_time: newStart.toISOString(),
+    end_time: newEnd.toISOString()
+  }
+}
+
 // 将日程分为未过期和已过期两组
 const upcomingSchedules = computed(() => {
   const now = new Date()
   // 添加30分钟缓冲时间，避免刚开始的日程立即进入历史记录
   const bufferTime = 30 * 60 * 1000 // 30分钟的毫秒数
-  
-  return filteredSchedules.value.filter(schedule => {
-    const scheduleDate = new Date(schedule.start_time)
-    const scheduleEndDate = schedule.end_time 
-      ? new Date(schedule.end_time) 
-      : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
-    
-    // 如果日程还未结束，或者在缓冲时间内，都算作"即将开始"
-    return scheduleEndDate > new Date(now.getTime() - bufferTime)
-  })
+
+  return filteredSchedules.value
+    .filter(schedule => {
+      // 追踪 is_completed，让 Vue 响应式系统能检测到状态变更
+      void schedule.is_completed
+
+      // 循环日程始终显示在"即将开始"
+      if (schedule.is_recurring || schedule.recurring_pattern) return true
+
+      const scheduleDate = new Date(schedule.start_time)
+      const scheduleEndDate = schedule.end_time
+        ? new Date(schedule.end_time)
+        : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
+
+      // 如果日程还未结束，或者在缓冲时间内，都算作"即将开始"
+      return scheduleEndDate > new Date(now.getTime() - bufferTime)
+    })
+    .map(schedule => {
+      // 追踪 is_completed，强制 Vue 响应式追踪
+      void schedule.is_completed
+
+      // 对循环日程，将已过期的实例替换为下一次发生时间
+      if (schedule.is_recurring || schedule.recurring_pattern) {
+        const next = getNextOccurrence(schedule.start_time, schedule.end_time, schedule.recurring_pattern)
+        const origStart = new Date(schedule.start_time)
+        const nextStart = new Date(next.start_time)
+        if (nextStart.getTime() !== origStart.getTime()) {
+          // 已推进到新实例，保留数据库中的完成状态
+          return { ...schedule, start_time: next.start_time, end_time: next.end_time }
+        }
+      }
+      // 始终返回新对象，保证 ScheduleCard 的 prop 引用变化，触发重新渲染
+      return { ...schedule }
+    })
+    // 按（推进后的）开始时间升序排列，离当前时间越近的越靠上
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
 })
 
 const pastSchedules = computed(() => {
   const now = new Date()
   // 与upcomingSchedules保持一致的缓冲逻辑
   const bufferTime = 30 * 60 * 1000 // 30分钟的毫秒数
-  
-  return filteredSchedules.value.filter(schedule => {
-    const scheduleDate = new Date(schedule.start_time)
-    const scheduleEndDate = schedule.end_time 
-      ? new Date(schedule.end_time) 
-      : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
-    
-    // 只有真正结束超过缓冲时间的日程才进入历史记录
-    return scheduleEndDate <= new Date(now.getTime() - bufferTime)
-  })
+
+  return filteredSchedules.value
+    .filter(schedule => {
+      // 追踪 is_completed
+      void schedule.is_completed
+
+      // 循环日程不进入历史记录
+      if (schedule.is_recurring || schedule.recurring_pattern) return false
+
+      const scheduleDate = new Date(schedule.start_time)
+      const scheduleEndDate = schedule.end_time
+        ? new Date(schedule.end_time)
+        : new Date(scheduleDate.getTime() + 60 * 60 * 1000) // 默认1小时
+
+      // 只有真正结束超过缓冲时间的日程才进入历史记录
+      return scheduleEndDate <= new Date(now.getTime() - bufferTime)
+    })
+    .map(schedule => ({ ...schedule }))
 })
 
 // 按日期分组 - 未过期日程
@@ -811,17 +915,13 @@ watch(() => userStore.user, (newUser) => {
 onMounted(async () => {
   currentTimezone.value = getTimezoneInfo()
 
-  // 获取每日智能摘要
-  await fetchDailyBriefing()
-  
   if (!userStore.user && userStore.token) {
     try {
       const response = await axios.get(`${API_URL}/auth/me`, {
         headers: { 'Authorization': `Bearer ${userStore.token}` }
       })
       userStore.user = response.data
-      
-      // 用户信息加载完成后更新标题
+
       document.title = `${userStore.user.username} - 我的日程`
     } catch (error) {
       console.error('恢复用户信息失败:', error)
@@ -831,14 +931,14 @@ onMounted(async () => {
       }
     }
   } else if (userStore.user?.username) {
-    // 如果用户信息已存在，也更新标题
     document.title = `${userStore.user.username} - 我的日程`
   }
-  
+
+  // 并行加载日程和相关数据（不再等待 AI 摘要）
   fetchSchedules()
   loadRecommendations()
+  fetchDailyBriefing()
 
-  // 设置语音识别查询回调：语音输入后若检测到查询意图，自动触发查询
   setVoiceQueryCallback(() => {
     handleQuerySchedules()
   })
@@ -953,7 +1053,7 @@ onUnmounted(() => {
           :searchQuery="searchQuery"
           @edit="openEditModal"
           @delete="deleteSchedule"
-          @complete="markScheduleComplete"
+          @complete="handleScheduleComplete"
         />
       </div>
 
@@ -1155,6 +1255,16 @@ onUnmounted(() => {
       @manual-input="openManualForm"
       @auto-schedule="openAutoScheduleModal"
     />
+    <!-- 通知提示 Toast -->
+    <transition name="fade">
+      <div v-if="notification.show" :class="['notification-toast', notification.type]">
+        <div class="notification-content">
+          <span class="notification-icon">{{ notification.type === 'success' ? '✓' : '✕' }}</span>
+          <span class="notification-message">{{ notification.message }}</span>
+        </div>
+        <div class="notification-progress"></div>
+      </div>
+    </transition>
   </div>
 </template>
 

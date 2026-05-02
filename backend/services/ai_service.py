@@ -60,6 +60,7 @@ class AIService:
                 self.api_url,
                 headers={'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'},
                 json=payload,
+                timeout=10
             )
             response.raise_for_status()
 
@@ -94,6 +95,7 @@ class AIService:
                 service.api_url,
                 headers={'Authorization': f'Bearer {service.api_key}', 'Content-Type': 'application/json'},
                 json=payload,
+                timeout=8
             )
             response.raise_for_status()
 

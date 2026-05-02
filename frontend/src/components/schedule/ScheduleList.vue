@@ -1,5 +1,5 @@
 <script setup>
-import { Sun, Clock, Archive } from 'lucide-vue-next'
+import { Sun, Clock, Archive, Search } from 'lucide-vue-next'
 import ScheduleCard from './ScheduleCard.vue'
 
 const props = defineProps({
@@ -84,7 +84,7 @@ const emit = defineEmits(['edit', 'delete', 'complete'])
           <ul class="schedule-list">
             <ScheduleCard
               v-for="schedule in schedulesOnDate"
-              :key="schedule.id"
+              :key="`${schedule.id}-${schedule.is_completed}`"
               :schedule="schedule"
               @edit="$emit('edit', $event)"
               @delete="$emit('delete', schedule.id)"
@@ -109,7 +109,7 @@ const emit = defineEmits(['edit', 'delete', 'complete'])
           <ul class="schedule-list">
             <ScheduleCard
               v-for="schedule in schedulesOnDate"
-              :key="schedule.id"
+              :key="`${schedule.id}-${schedule.is_completed}`"
               :schedule="schedule"
               @edit="$emit('edit', $event)"
               @delete="$emit('delete', schedule.id)"

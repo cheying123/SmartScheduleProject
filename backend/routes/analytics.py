@@ -7,6 +7,7 @@ from models.user import User
 from models.schedule import Schedule
 from extensions import db
 from datetime import datetime, timedelta, timezone
+import calendar
 
 logger = logging.getLogger(__name__)
 
@@ -439,56 +440,150 @@ def _get_tag_distribution(user_id):
     return result
 
 
+def count_occurrences_in_range(schedule, range_start, range_end):
+    """计算日程在指定时间范围内出现的次数（用于循环日程的统计）"""
+    pattern = schedule.recurring_pattern
+    if not pattern:
+        # 非循环：在范围内则算 1 次
+        return 1 if range_start <= schedule.start_time < range_end else 0
+
+    if pattern == 'daily':
+        start = max(schedule.start_time, range_start)
+        if start >= range_end:
+            return 0
+        delta = range_end - start
+        days = delta.days
+        if days == 0:
+            return 1
+        # 有跨天余数说明还有一次
+        return days + (1 if delta.seconds > 0 or delta.microseconds > 0 else 0)
+
+    if pattern == 'weekly':
+        count = 0
+        current = schedule.start_time
+        # 最多循环 52 周（安全上限）
+        for _ in range(52):
+            if current >= range_end:
+                break
+            if current >= range_start:
+                count += 1
+            current += timedelta(days=7)
+        return count
+
+    if pattern == 'monthly':
+        count = 0
+        current = schedule.start_time
+        # 最多循环 12 个月（安全上限）
+        for _ in range(12):
+            if current >= range_end:
+                break
+            if current >= range_start:
+                count += 1
+            month = current.month + 1
+            year = current.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            try:
+                current = current.replace(year=year, month=month, day=current.day)
+            except ValueError:
+                last_day = calendar.monthrange(year, month)[1]
+                current = current.replace(year=year, month=month, day=min(current.day, last_day))
+        return count
+
+    return 1
+
+
 @analytics_bp.route('/stats', methods=['GET'])
 @jwt_required()
 def get_user_stats():
-    """获取用户统计数据"""
+    """获取用户统计数据（正确处理循环日程的完成率）"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         # 计算今天的日期范围（UTC）
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + timedelta(days=1)
-        
+
         # 计算本周的日期范围（周一到周日）
         today = datetime.utcnow()
         monday = today - timedelta(days=today.weekday())
         week_start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
         week_end = week_start + timedelta(days=7)
-        
-        # 今日统计
-        today_schedules = Schedule.query.filter(
+
+        # === 今日统计 ===
+        # 非循环日程（既不是循环标记，也没有循环模式）
+        today_non_recurring = Schedule.query.filter(
             Schedule.user_id == current_user_id,
+            Schedule.is_recurring == False,
+            Schedule.recurring_pattern.is_(None),
             Schedule.start_time >= today_start,
             Schedule.start_time < today_end
         ).all()
-        
-        today_total = len(today_schedules)
-        today_completed = sum(1 for s in today_schedules if s.is_completed)
-        
-        # 本周统计
-        week_schedules = Schedule.query.filter(
+        # 所有可能有循环标记的日程
+        today_recurring = Schedule.query.filter(
             Schedule.user_id == current_user_id,
+            db.or_(
+                Schedule.is_recurring == True,
+                Schedule.recurring_pattern.isnot(None)
+            )
+        ).all()
+
+        today_total = len(today_non_recurring)
+        today_completed = sum(1 for s in today_non_recurring if s.is_completed)
+
+        # 循环日程：计算今天发生的次数
+        for s in today_recurring:
+            count = count_occurrences_in_range(s, today_start, today_end)
+            today_total += count
+            # 循环日程的 is_completed 仅算 1 次完成（不能一键完成所有天）
+            if count > 0 and s.is_completed:
+                today_completed += 1
+
+        # === 本周统计 ===
+        # 非循环日程
+        week_non_recurring = Schedule.query.filter(
+            Schedule.user_id == current_user_id,
+            Schedule.is_recurring == False,
+            Schedule.recurring_pattern.is_(None),
             Schedule.start_time >= week_start,
             Schedule.start_time < week_end
         ).all()
-        
-        week_total = len(week_schedules)
-        week_completed = sum(1 for s in week_schedules if s.is_completed)
-        
-        # 计算本周专注时长（小时）
+        # 所有循环日程
+        week_recurring = Schedule.query.filter(
+            Schedule.user_id == current_user_id,
+            db.or_(
+                Schedule.is_recurring == True,
+                Schedule.recurring_pattern.isnot(None)
+            )
+        ).all()
+
+        week_total = len(week_non_recurring)
+        week_completed = sum(1 for s in week_non_recurring if s.is_completed)
+
+        # 循环日程：按出现次数计算
+        for s in week_recurring:
+            count = count_occurrences_in_range(s, week_start, week_end)
+            week_total += count
+            if count > 0 and s.is_completed:
+                week_completed += 1
+
+        # 计算本周专注时长（小时）— 只按非循环日程 + 循环日程的原始时间统计
         week_focus_minutes = 0
-        for s in week_schedules:
+        for s in week_non_recurring:
             if s.end_time and s.start_time:
                 duration = (s.end_time - s.start_time).total_seconds() / 60
                 week_focus_minutes += duration
-        
+        for s in week_recurring:
+            count = count_occurrences_in_range(s, week_start, week_end)
+            if count > 0 and s.end_time and s.start_time:
+                duration = (s.end_time - s.start_time).total_seconds() / 60
+                week_focus_minutes += duration * count
+
         week_focus_hours = round(week_focus_minutes / 60, 1)
-        
+
         # 完成率
         today_completion_rate = round((today_completed / today_total * 100) if today_total > 0 else 0, 1)
         week_completion_rate = round((week_completed / week_total * 100) if week_total > 0 else 0, 1)
-        
+
         return jsonify({
             'today': {
                 'total': today_total,
@@ -502,7 +597,7 @@ def get_user_stats():
                 'focus_hours': week_focus_hours
             }
         }), 200
-        
+
     except Exception as e:
         logger.exception("获取统计数据失败")
         return jsonify({'error': str(e)}), 500

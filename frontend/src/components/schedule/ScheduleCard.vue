@@ -60,22 +60,26 @@ function isScheduleEnded(startTime, endTime) {
  * 获取日程状态文本
  */
 function getScheduleStatusText() {
+  // 已完成优先显示
+  if (props.schedule.is_completed) {
+    return '已完成'
+  }
+
   const startTime = props.schedule.start_time
   const endTime = props.schedule.end_time
-  
+
   if (!startTime) return ''
-  
-  // 先判断是否已结束
+
+  // 判断是否已结束
   if (isScheduleEnded(startTime, endTime)) {
     return '已结束'
   }
-  
-  // 再判断是否已开始但未结束
+
+  // 判断是否已开始但未结束
   if (isPastSchedule(startTime)) {
     return '进行中'
   }
-  
-  // 还未开始
+
   return ''
 }
 
@@ -84,6 +88,7 @@ function getScheduleStatusText() {
  */
 function getStatusClass() {
   const status = getScheduleStatusText()
+  if (status === '已完成') return 'status-completed'
   if (status === '已结束') return 'status-ended'
   if (status === '进行中') return 'status-ongoing'
   return ''
@@ -123,7 +128,13 @@ function getRecurringText(pattern) {
 </script>
 
 <template>
-  <li class="schedule-item" :class="{ 'past-schedule': isPastSchedule(schedule.start_time) }">
+  <li class="schedule-item" :class="{
+    'past-schedule': isPastSchedule(schedule.start_time),
+    'is-done': schedule.is_completed
+  }">
+    <!-- 已完成角标 -->
+    <div v-if="schedule.is_completed" class="done-ribbon">已完成</div>
+
     <!-- 时间显示 -->
     <div class="item-time">
       <span class="time-text">{{ formatTime(schedule.start_time) }}</span>
@@ -136,8 +147,8 @@ function getRecurringText(pattern) {
     <div class="item-content">
       <h4>{{ schedule.title }}</h4>
       <p v-if="schedule.content">{{ schedule.content }}</p>
-      
-      <!-- 倒计时显示（新增） -->
+
+      <!-- 倒计时显示 -->
       <CountdownDisplay 
         v-if="schedule.countdown"
         :target-time="schedule.start_time"
@@ -184,20 +195,25 @@ function getRecurringText(pattern) {
     
     <!-- 操作按钮 -->
     <div class="item-actions">
-      <!-- 完成按钮（仅在未完成且未结束时显示） -->
-      <button 
-        v-if="!schedule.is_completed && !isScheduleEnded(schedule.start_time, schedule.end_time)"
-        class="action-btn action-btn-complete" 
-        @click="handleComplete" 
+      <!-- 完成按钮（仅在未完成时显示，过期日程也可标记完成） -->
+      <button
+        v-if="!schedule.is_completed"
+        class="action-btn action-btn-complete"
+        @click="handleComplete"
         title="标记为已完成"
       >
         <Check :size="20"/>
       </button>
       
-      <!-- 已完成标记（已完成后显示） -->
-      <div v-if="schedule.is_completed" class="completed-badge" title="已完成">
-        <Check :size="18"/>
-      </div>
+      <!-- 已完成标记（圆章样式，点击可取消） -->
+      <button
+        v-if="schedule.is_completed"
+        class="completed-stamp"
+        @click="handleComplete"
+        title="点击取消完成"
+      >
+        <Check :size="16"/>
+      </button>
       
       <button class="action-btn" @click="handleEdit" title="编辑">
         <Edit2 :size="20"/>
@@ -217,7 +233,8 @@ function getRecurringText(pattern) {
   padding: 1rem;
   border-radius: 8px;
   box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, background-color 0.35s ease, border-left-color 0.35s ease;
+  border-left: 4px solid transparent;
 }
 
 .schedule-item:hover {
@@ -257,6 +274,13 @@ function getRecurringText(pattern) {
   font-weight: 600;
   white-space: nowrap;
   animation: fadeIn 0.3s ease;
+}
+
+/* 已完成的状态 - 绿色 */
+.status-completed {
+  background-color: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
 }
 
 /* 进行中的状态 - 橙色 */
@@ -391,6 +415,7 @@ function getRecurringText(pattern) {
 .action-btn-complete {
   background-color: #e8f5e9;
   color: #2e7d32;
+  border: 1px solid #a5d6a7;
 }
 
 .action-btn-complete:hover {
@@ -398,31 +423,53 @@ function getRecurringText(pattern) {
   color: white;
 }
 
-/* 已完成标记徽章 */
-.completed-badge {
-  width: 36px;
-  height: 36px;
+/* 已完成圆章（可点击取消，区别于方形操作按钮） */
+.completed-stamp {
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #4caf50;
-  color: white;
-  border-radius: 6px;
-  animation: completePulse 0.5s ease;
+  background-color: #f6ffed;
+  color: #52c41a;
+  border: 2px solid #b7eb8f;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 4px rgba(82, 196, 26, 0.2);
 }
 
-@keyframes completePulse {
-  0% {
-    transform: scale(0.8);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.1);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+.completed-stamp:hover {
+  background-color: #52c41a;
+  color: white;
+  border-color: #2d7b1a;
+  transform: scale(1.15);
+  box-shadow: 0 4px 8px rgba(82, 196, 26, 0.3);
+}
+
+/* 已完成日程 — 整张卡片绿色左边框 */
+.schedule-item.is-done {
+  border-left: 4px solid #52c41a;
+  background-color: #f6ffed;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 右上角 "已完成" 角标 */
+.done-ribbon {
+  position: absolute;
+  top: 12px;
+  right: -28px;
+  background: #52c41a;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 2px 32px;
+  transform: rotate(45deg);
+  letter-spacing: 1px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  z-index: 1;
+  pointer-events: none;
 }
 
 .recurring-badge {
@@ -435,23 +482,4 @@ function getRecurringText(pattern) {
   font-weight: 600;
 }
 
-.status-badge {
-  font-size: 0.75rem;
-  background-color: #e3f2fd;
-  color: #1976d2;
-  padding: 2px 8px;
-  border-radius: 12px;
-  margin-left: 8px;
-  font-weight: 600;
-}
-
-.status-ended {
-  background-color: #ffebee;
-  color: #c62828;
-}
-
-.status-ongoing {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-}
 </style>

@@ -35,9 +35,11 @@ def get_schedules(current_user):
         if today_str <= d <= seven_days_str and (not s.weather_info or '气温' not in s.weather_info):
             dates_needing_weather.add(d)
 
-    # 每日期仅调用一次天气 API
+    # 每日期仅调用一次天气 API（最多 2 次，避免阻塞太久；下次请求会自动补齐）
     weather_cache = {}
-    for d in dates_needing_weather:
+    for i, d in enumerate(sorted(dates_needing_weather)):
+        if i >= 2:
+            break
         try:
             result = get_weather_with_alerts(city_location_id, d)
             if result:
@@ -556,9 +558,12 @@ def mark_schedule_complete(current_user, id):
     if schedule.user_id != current_user.id:
         return jsonify({'error': '无权操作此日程'}), 403
     
-    # 直接切换完成状态，不需要请求体
+    # 直接切换完成状态
     schedule.is_completed = not schedule.is_completed
-    
+
+    # 记录完成/取消完成的时间
+    schedule.completed_at = datetime.utcnow() if schedule.is_completed else None
+
     db.session.commit()
     
     return jsonify({
