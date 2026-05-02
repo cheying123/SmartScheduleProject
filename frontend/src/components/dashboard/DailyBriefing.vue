@@ -6,14 +6,8 @@
     <div class="briefing-body">
       <div class="briefing-header-row">
         <h3>🌤️ 今日智能提醒</h3>
-        <button 
-          v-if="dailyBriefing.ai_advice" 
-          class="speak-btn-mini" 
-          @click="handleSpeak(dailyBriefing.ai_advice)"
-          title="语音播报"
-        >
-          🔊
-        </button>
+        <!-- 语音播报已关闭 -->
+
       </div>
       
       <p class="briefing-text">
@@ -71,17 +65,7 @@ const props = defineProps({
 // 定义组件的 emits
 const emit = defineEmits(['refresh-briefing']);
 
-// 语音播报函数
-function handleSpeak(text) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel(); // 停止之前的播报
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-CN';
-    window.speechSynthesis.speak(utterance);
-  } else {
-    alert('您的浏览器不支持语音播报');
-  }
-}
+// 语音播报已关闭
 
 // 刷新摘要函数
 async function refreshBriefing() {

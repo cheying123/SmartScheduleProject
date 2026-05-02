@@ -34,21 +34,7 @@ export function useNaturalLanguage(API_URL, fetchSchedules) {
    * 实现任务书中的"多模态反馈"
    */
   function speak(text, priority = false) {
-    if ('speechSynthesis' in window) {
-      // 如果是高优先级（如冲突警告），强制打断当前播报
-      if (priority) {
-        window.speechSynthesis.cancel()
-      } else if (window.speechSynthesis.speaking && !priority) {
-        // 普通消息排队，不强行打断
-        return 
-      }
-      
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'zh-CN'
-      utterance.rate = 1.0 // 语速
-      utterance.pitch = 1.0 // 音调
-      window.speechSynthesis.speak(utterance)
-    }
+    // 语音合成已关闭
   }
 
   /**

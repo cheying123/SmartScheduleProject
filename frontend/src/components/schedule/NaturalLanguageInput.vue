@@ -84,11 +84,11 @@ const emit = defineEmits([
       <!-- 操作按钮区域 -->
       <div class="nl-actions">
         <!-- 第一行：语音输入（独立大按钮） -->
-        <button 
-          type="button" 
-          class="voice-btn" 
-          @click="$emit('voice-input')"
-          :disabled="isProcessing || isRecording"
+        <button
+          type="button"
+          class="voice-btn"
+          @click="isRecording ? $emit('stop-voice') : $emit('voice-input')"
+          :disabled="isProcessing"
           :class="{ 'recording': isRecording }"
         >
           <span class="btn-icon">🎤</span>

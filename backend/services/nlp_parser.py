@@ -1,6 +1,6 @@
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from config import Config
 from ai_parser import parse_with_ai as ai_parse
 
@@ -113,24 +113,40 @@ def _parse_with_rules(text: str, timezone_offset: int = 480) -> dict:
     elif '早上' in text and hour >= 12:
         hour -= 12
     
-    result['start_time'] = datetime.combine(target_date, datetime.time(hour, minute))
+    result['start_time'] = datetime.combine(target_date, time(hour, minute)) - timedelta(minutes=timezone_offset)
     result['end_time'] = result['start_time'] + timedelta(hours=1)
     
     # 提取标题
+    title = ''
     title_patterns = [
-        r'安排 (.*?)(?:的 | ？)',
-        r'提醒我 (.*?)(?:的 | ？)',
-        r'(.*?)会议',
-        r'(.*?)活动'
+        r'(?:帮我|给我|请)?安排[一下]*(.+?)(?:的|$|？)',
+        r'(?:帮我|给我|请)?提醒我(.+?)(?:的|$|？)',
+        r'(?:帮我|给我|请)?记(?:录|下)(.+?)(?:的|$|？)',
+        r'(?:帮我|给我|请)?创建(.+?)(?:的|$|？)',
+        r'(?:帮我|给我|请)?添加(.+?)(?:的|$|？)',
     ]
-    
+
     for pattern in title_patterns:
         match = re.search(pattern, text)
         if match:
-            result['title'] = match.group(1).strip()
+            title = match.group(1).strip()
             break
-    
-    if not result['title']:
+
+    # 如果上面的没匹配到：去掉常见前缀和时间词后取剩余文本
+    if not title:
+        cleaned = re.sub(r'(?:帮我|给我|请|麻烦你|安排|提醒|记一下|记下|创建|添加)\s*', '', text)
+        cleaned = re.sub(r'(?:明天|后天|今天|下周|下个|下周|这周|这个)\s*', '', cleaned)
+        cleaned = re.sub(r'[上下]午\s*', '', cleaned)
+        cleaned = re.sub(r'\d+\s*[点时]\s*\d*\s*分?', '', cleaned)
+        cleaned = re.sub(r'(?:的|了|吧|嘛)$', '', cleaned)
+        title = cleaned.strip()
+
+    # 去掉尾部残留的时间介词和结构助词
+    title = re.sub(r'(?:在|于|从|到|的)$', '', title).strip()
+
+    if title:
+        result['title'] = title
+    else:
         result['title'] = text
     
     # 检查重复

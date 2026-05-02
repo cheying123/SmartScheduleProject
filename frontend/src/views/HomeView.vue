@@ -248,16 +248,8 @@ const {
 const queryResult = ref(null)
 const isResultCollapsed = ref(false)
 
-// ✅ 新增：定义本地播报函数，解决模板中找不到 speak 的问题
+// ✅ 语音播报已关闭
 function handleSpeak(text) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel() // 停止之前的播报
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'zh-CN'
-    window.speechSynthesis.speak(utterance)
-  } else {
-    alert('您的浏览器不支持语音播报')
-  }
 }
 
 /**
@@ -1117,6 +1109,7 @@ onUnmounted(() => {
               @cancel="handleCancelClick"
               @switch-mode="openCreateForm"
               @voice-input="startVoiceInput"
+              @stop-voice="stopRecording"
               @query-schedules="handleQuerySchedules"
               @update:input-value="naturalLanguageInput = $event"
             />

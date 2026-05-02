@@ -18,12 +18,13 @@ AI_API_URL = os.environ.get('AI_API_URL', Config.AI_API_URL)
 AI_MODEL = os.environ.get('AI_MODEL', Config.AI_MODEL)
 
 _RESPONSE_PATHS = [
-    lambda x: x['choices'][0]['message']['content'],
-    lambda x: x['choices'][0]['delta']['content'],
-    lambda x: x['output']['choices'][0]['message']['content'],
-    lambda x: x['output']['choices'][0]['text'],
-    lambda x: x['result'],
-    lambda x: x['response'],
+    lambda x: x['output']['text'],  # 阿里云DashScope API的主要路径
+    lambda x: x['choices'][0]['message']['content'],  # OpenAI兼容路径
+    lambda x: x['choices'][0]['delta']['content'],    # 流式响应路径
+    lambda x: x['output']['choices'][0]['message']['content'],  # 其他可能的路径
+    lambda x: x['output']['choices'][0]['text'],      # 阿里云另一种可能的路径
+    lambda x: x['result'],                            # 其他API可能的路径
+    lambda x: x['response'],                          # 其他API可能的路径
 ]
 
 
@@ -66,20 +67,31 @@ def parse_with_ai(text, timezone_offset=480):
 
     payload = {
         'model': AI_MODEL,
-        'messages': [{'role': 'user', 'content': prompt}],
-        'temperature': 0.05,
+        'input': {
+            'prompt': prompt
+        },
+        'parameters': {
+            'temperature': 0.05,
+        }
     }
 
     try:
+        headers = {'Content-Type': 'application/json'}
+        if AI_API_KEY:
+            headers['Authorization'] = f'Bearer {AI_API_KEY}'
+
         response = requests.post(
             AI_API_URL,
-            headers={'Content-Type': 'application/json'},
+            headers=headers,
             json=payload,
             timeout=30,
         )
 
         if response.status_code != 200:
             logger.error("AI API 请求失败，状态码: %d", response.status_code)
+            logger.error("响应内容: %s", response.text)
+            logger.error("请求URL: %s", AI_API_URL)
+            logger.error("请求载荷: %s", json.dumps(payload, ensure_ascii=False))
             return None
 
         result = extract_json_from_response(response.json())
