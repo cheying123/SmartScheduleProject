@@ -23,7 +23,7 @@
       <div class="briefing-meta">
         <span class="meta-item">
           <Calendar :size="14" /> 
-          {{ dailyBriefing.schedule_count || 0 }} 个日程
+          {{ dailyBriefing.schedules_count ?? 0 }} 个日程
         </span>
         
         <span v-if="dailyBriefing.weather && dailyBriefing.weather.text !== '未知'" class="meta-item weather-item">

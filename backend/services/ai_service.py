@@ -107,42 +107,62 @@ class AIService:
             return "抱歉，AI 服务暂时繁忙，请稍后再试。"
 
     def _build_system_prompt(self, user_data):
-        prompt = """你是一个专业的智能日程分析助手，专门帮助用户分析日程习惯并提供个性化建议。
+        prompt = """你是一个专业的智能日程管理助手，帮助用户分析日程数据并提供可执行的优化建议。
 
-你的主要职责：
-1. 分析用户的高效工作时间段和繁忙日期
-2. 提供日程安排优化建议
-3. 提醒用户注意休息和工作平衡
-4. 根据天气情况给出出行建议
-5. 回答用户关于时间管理和日程规划的任何问题
+## 回答规范
+1. 使用友好的语气，像朋友一样交流
+2. 回答要简洁、具体、可执行
+3. 使用 **加粗** 强调重点内容
+4. 列举条目时使用 - 符号
+5. 适当使用空行分隔不同主题
 
-请使用友好、专业、鼓励的语气，给出的建议要具体、可执行。
-如果用户询问与日程管理无关的问题，礼貌地引导回日程管理话题。"""
+## 你可以帮助用户
+- 分析时间安排是否合理
+- 评估日程优先级设置是否恰当
+- 发现潜在的时间管理问题
+- 提供提高效率的具体方法
+- 给出工作生活平衡的建议
+- 结合完成率数据给出改善方案
+
+如果用户询问与日程管理无关的问题，礼貌地引导回日程管理话题。
+
+注意：日程数据中的时间已转换为北京时间（UTC+8），分析时请基于这个时区判断。"""
 
         if user_data:
-            prompt += "\n\n【当前用户的日程数据】"
+            prompt += "\n\n## 当前用户的日程数据"
             if user_data.get('productive_hours'):
-                prompt += f"\n• 高效时段：{', '.join(map(str, user_data['productive_hours']))}点"
+                prompt += f"\n- 高效时段：{', '.join(map(str, user_data['productive_hours']))}点"
             if user_data.get('busy_days'):
                 busy_days_str = ', '.join([_WEEKDAY_MAP[d] for d in user_data['busy_days']])
-                prompt += f"\n• 繁忙日期：{busy_days_str}"
+                prompt += f"\n- 繁忙日期：{busy_days_str}"
             if user_data.get('total_tasks'):
-                prompt += f"\n• 总任务数：{user_data['total_tasks']}个"
+                prompt += f"\n- 总任务数：{user_data['total_tasks']}个"
             if user_data.get('completion_rate'):
-                prompt += f"\n• 完成率：{user_data['completion_rate']:.1%}"
+                prompt += f"\n- 完成率：{user_data['completion_rate']:.1%}"
+            if user_data.get('avg_duration'):
+                prompt += f"\n- 平均任务时长：{user_data['avg_duration']}分钟"
+            if user_data.get('high_priority_ratio'):
+                prompt += f"\n- 高优先级任务占比：{user_data['high_priority_ratio']:.0%}"
 
-            prompt += "\n\n请基于以上数据，为用户提供有针对性的个性化建议。"
+            prompt += "\n\n基于以上数据，给出有针对性的个性化建议。"
 
         return prompt
 
     def generate_ai_recommendations(self, user_statistics):
         try:
             user_id = user_statistics.get('user_id')
+            productivity = user_statistics.get('productivity', {})
+            weekly = user_statistics.get('weekly_pattern', {})
+            duration = user_statistics.get('duration_preference', {})
+            priority_dist = user_statistics.get('priority_distribution', {})
+
             user_data = {
-                'productive_hours': user_statistics.get('productivity', {}).get('productive_hours', []),
-                'busy_days': user_statistics.get('weekly_pattern', {}).get('busy_days', []),
-                'total_tasks': user_statistics.get('productivity', {}).get('total_tasks', 0),
-                'completion_rate': user_statistics.get('productivity', {}).get('completion_rate', 0),
+                'productive_hours': productivity.get('productive_hours', []),
+                'busy_days': weekly.get('busy_days', []),
+                'total_tasks': productivity.get('total_tasks', 0),
+                'completion_rate': productivity.get('completion_rate', 0),
+                'avg_duration': duration.get('average_duration_minutes', 0),
+                'high_priority_ratio': priority_dist.get('high_priority_ratio', 0),
             }
 
             end_date = datetime.utcnow()
@@ -169,7 +189,7 @@ class AIService:
 
             schedule_details = ""
             if schedule_list:
-                schedule_details = "\n【我最近的日程安排】\n"
+                schedule_details = "\n【我最近的日程安排】（以下时间均为北京时间 UTC+8）\n"
                 for i, s in enumerate(schedule_list, 1):
                     priority_str = "⭐" * s['priority'] if s['priority'] else ""
                     schedule_details += f"{i}. {s['time']} - {s['title']}"
@@ -183,21 +203,26 @@ class AIService:
 
             messages = [{
                 'role': 'user',
-                'content': f"""请根据我的日程数据和以下详细日程安排，给我一些个性化的日程管理建议。
+                'content': f"""请根据我的日程数据，给出 4-6 条个性化的日程管理建议。
 
-我的高效时段：{user_data.get('productive_hours', [])}
-我的繁忙日期：{user_data.get('busy_days', [])}
-总任务数：{user_data.get('total_tasks', 0)}
-完成率：{user_data.get('completion_rate', 0):.1%}
+【我的数据】
+- 高效时段：{user_data.get('productive_hours', [])}
+- 繁忙日期：{user_data.get('busy_days', [])}
+- 总任务数：{user_data.get('total_tasks', 0)}
+- 完成率：{user_data.get('completion_rate', 0):.1%}
+- 平均任务时长：{user_data.get('avg_duration', 0)}分钟
+- 高优先级占比：{user_data.get('high_priority_ratio', 0):.0%}
 {schedule_details}
 
-请从以下几个角度给我建议：
-1. 时间分配是否合理？哪些时间段可以更好地利用？
-2. 我的日程安排有什么特点或问题？
-3. 如何提高我的日程管理效率？
-4. 对于重复性活动，有什么优化建议？
+请用以下格式输出（每个建议以【】开头）：
 
-请用简洁、实用的条目列出建议。"""
+【时间分配】针对时间安排的分析和建议
+【效率提升】关于如何提高效率的具体方法
+【工作平衡】关于劳逸结合的建议
+【习惯养成】关于优化日程习惯的建议
+【优先事项】关于任务优先级管理的建议
+
+每条建议不低于 2 句话，包含具体可执行的操作。"""
             }]
 
             ai_response = self.chat(messages, user_data)
@@ -205,38 +230,68 @@ class AIService:
             if not ai_response or ai_response.startswith("抱歉") or ai_response.startswith("⚠️"):
                 logger.warning("AI 返回了错误信息，使用默认推荐")
                 return [{
-                    'type': 'ai_insight',
+                    'type': '时间偏好',
                     'title': 'AI 洞察',
                     'message': '继续记录您的日程，积累更多数据后我将为您提供更精准的分析建议！',
                     'confidence': 0.8,
                 }]
 
-            recommendations = []
-            current_rec = {}
+            # 类型映射：中文【标题】→ type值
+            type_keywords = {
+                '时间分配': '时间偏好',
+                '效率提升': '效率提升',
+                '工作平衡': '日程平衡',
+                '习惯养成': '习惯养成',
+                '优先事项': '时间偏好',
+            }
+            title_keywords = {
+                '时间分配': '优化时间分配',
+                '效率提升': '提升工作效率',
+                '工作平衡': '保持工作平衡',
+                '习惯养成': '培养良好习惯',
+                '优先事项': '管理优先级',
+            }
 
-            for line in ai_response.split('\n'):
-                line = line.strip()
-                if line and (line[0].isdigit() and '.' in line[:3]) or line.startswith('•') or line.startswith('-'):
-                    if current_rec:
-                        recommendations.append(current_rec)
-                    current_rec = {
-                        'type': 'ai_insight',
-                        'title': f'AI 建议 {len(recommendations) + 1}',
-                        'message': line.lstrip('0123456789.•-').strip(),
-                        'confidence': 0.9,
-                    }
-                elif current_rec and line:
-                    current_rec['message'] += '\n' + line
+            recommendations = []
+            lines = ai_response.split('\n')
+            current_rec = None
+
+            for line in lines:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                # 检测新建议的开始【...】
+                section_match = False
+                for cn_key, type_val in type_keywords.items():
+                    if cn_key in stripped and stripped.startswith('【'):
+                        if current_rec:
+                            recommendations.append(current_rec)
+                        current_rec = {
+                            'type': type_val,
+                            'title': title_keywords.get(cn_key, 'AI 建议'),
+                            'message': stripped,
+                            'confidence': 0.85,
+                        }
+                        section_match = True
+                        break
+
+                if section_match:
+                    continue
+
+                if current_rec and not stripped.startswith('【'):
+                    current_rec['message'] += '\n' + stripped
 
             if current_rec:
                 recommendations.append(current_rec)
 
+            # 如果解析失败，用整段文本兜底
             if not recommendations:
                 recommendations.append({
-                    'type': 'ai_insight',
-                    'title': 'AI 洞察',
-                    'message': ai_response,
-                    'confidence': 0.85,
+                    'type': 'AI 洞察',
+                    'title': '综合分析',
+                    'message': ai_response[:500],
+                    'confidence': 0.8,
                 })
 
             logger.debug("生成了 %d 条推荐", len(recommendations))
@@ -245,7 +300,7 @@ class AIService:
         except Exception:
             logger.exception("生成 AI 推荐失败")
             return [{
-                'type': 'ai_insight',
+                'type': 'AI 洞察',
                 'title': '系统提示',
                 'message': '生成推荐时出现错误，请稍后重试',
                 'confidence': 0.5,
@@ -331,7 +386,7 @@ class AIService:
             if not schedules:
                 return "用户最近没有创建任何日程"
 
-            context = "【用户最近的日程安排】\n"
+            context = "【用户最近的日程安排】（以下时间均为北京时间 UTC+8）\n"
             for s in schedules:
                 local_time = s.start_time + timedelta(hours=8)
                 context += f"• {local_time.strftime('%m-%d %H:%M')}({_WEEKDAY_MAP[local_time.weekday()]}) - {s.title}"

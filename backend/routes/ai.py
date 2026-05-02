@@ -44,9 +44,12 @@ def chat():
         user_stats = {
             'productivity': UserBehaviorAnalyzer.analyze_productivity_hours(current_user_id),
             'weekly_pattern': UserBehaviorAnalyzer.analyze_weekly_pattern(current_user_id),
+            'duration_preference': UserBehaviorAnalyzer.analyze_task_duration_preference(current_user_id),
+            'priority_distribution': UserBehaviorAnalyzer.analyze_priority_distribution(current_user_id),
         }
 
         ai_response = ai_service.chat(messages, user_stats)
+        logger.debug("AI chat response received for session %s", session_id)
 
         user_conv = Conversation(
             user_id=current_user_id,
