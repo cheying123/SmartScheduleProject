@@ -20,9 +20,13 @@ def get_daily_briefing():
     try:
         current_user_id = get_jwt_identity()
         
-        # 1. 获取今天的日期范围 (UTC)
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        # 1. 获取今天的日期范围（基于北京时间 UTC+8，再转 UTC 查库）
+        beijing_tz = timezone(timedelta(hours=8))
+        beijing_now = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(beijing_tz)
+        today_start_beijing = beijing_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end_beijing = today_start_beijing + timedelta(days=1)
+        today_start = today_start_beijing.astimezone(timezone.utc).replace(tzinfo=None)
+        today_end = today_end_beijing.astimezone(timezone.utc).replace(tzinfo=None)
         
         # 2. 查询今天的所有日程
         schedules = Schedule.query.filter(
@@ -499,15 +503,20 @@ def get_user_stats():
     try:
         current_user_id = get_jwt_identity()
 
-        # 计算今天的日期范围（UTC）
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        # 使用北京时间（UTC+8）计算今天的日期范围
+        beijing_tz = timezone(timedelta(hours=8))
+        beijing_now = datetime.utcnow().replace(tzinfo=timezone.utc).astimezone(beijing_tz)
+        today_start_beijing = beijing_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end_beijing = today_start_beijing + timedelta(days=1)
 
-        # 计算本周的日期范围（周一到周日）
-        today = datetime.utcnow()
-        monday = today - timedelta(days=today.weekday())
-        week_start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_end = week_start + timedelta(days=7)
+        # 转换为 UTC 时间用于数据库查询
+        today_start = today_start_beijing.astimezone(timezone.utc).replace(tzinfo=None)
+        today_end = today_end_beijing.astimezone(timezone.utc).replace(tzinfo=None)
+
+        # 计算本周的日期范围（周一到周日，基于北京时间）
+        monday_beijing = today_start_beijing - timedelta(days=today_start_beijing.weekday())
+        week_start = monday_beijing.astimezone(timezone.utc).replace(tzinfo=None)
+        week_end = (monday_beijing + timedelta(days=7)).astimezone(timezone.utc).replace(tzinfo=None)
 
         # === 今日统计 ===
         # 非循环日程（既不是循环标记，也没有循环模式）
