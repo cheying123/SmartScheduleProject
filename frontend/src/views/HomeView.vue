@@ -467,8 +467,8 @@ async function forceCreateSchedule() {
   try {
     const response = await axios.post(`${API_URL}/schedules/force-create`, {
       title: conflictDialog.value.parsed_data.title,
-      start_time: conflictDialog.value.parsed_data.start_time,
-      end_time: conflictDialog.value.parsed_data.end_time,
+      start_time: new Date(conflictDialog.value.parsed_data.start_time).toISOString(),
+      end_time: conflictDialog.value.parsed_data.end_time ? new Date(conflictDialog.value.parsed_data.end_time).toISOString() : null,
       content: naturalLanguageInput.value,
       priority: conflictDialog.value.parsed_data.priority || 1,
       is_recurring: conflictDialog.value.parsed_data.is_recurring || false,
@@ -482,10 +482,16 @@ async function forceCreateSchedule() {
     
     // 关闭冲突对话框
     conflictDialog.value = null
-    
+
+    // 关闭底层表单和NLP输入
+    isFormVisible.value = false
+    isNaturalLanguageMode.value = false
+    naturalLanguageInput.value = ''
+    resetScheduleForm()
+
     // 刷新日程列表
     await fetchSchedules()
-    
+
     // 显示成功通知
     showNotification('success', '✅ 日程已创建（已忽略冲突）！')
 
@@ -499,11 +505,22 @@ async function forceCreateSchedule() {
 // 采纳 AI 建议的时间段
 async function handleApplySuggestion(suggestion) {
   if (!conflictDialog.value?.parsed_data || !suggestion) return
-  // 更新为新建议的时间
-  conflictDialog.value.parsed_data.start_time = suggestion.start_time
-  conflictDialog.value.parsed_data.end_time = suggestion.end_time
-  // 重新尝试创建
-  await forceCreateSchedule()
+
+  // 用推荐时间覆盖表单的时间，保留其他内容
+  newSchedule.value.start_time = suggestion.start_time
+  newSchedule.value.end_time = suggestion.end_time
+
+  // 如果是 NLP 模式，切到表单模式让用户手动提交
+  if (isNaturalLanguageMode.value) {
+    newSchedule.value.title = conflictDialog.value.parsed_data.title || naturalLanguageInput.value
+    newSchedule.value.priority = conflictDialog.value.parsed_data.priority || 1
+    newSchedule.value.tags = conflictDialog.value.parsed_data.tags || []
+    createMode.value = 'form'
+  }
+
+  // 关掉冲突对话框，保持表单打开
+  isNaturalLanguageMode.value = false
+  conflictDialog.value = null
 }
 
 const {

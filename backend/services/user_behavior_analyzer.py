@@ -14,11 +14,11 @@ class UserBehaviorAnalyzer:
     def analyze_productivity_hours(user_id, days=30):
         """
         分析用户的高效工作时间段
-        
+
         Args:
             user_id: 用户 ID
             days: 分析最近多少天的数据
-            
+
         Returns:
             {
                 'productive_hours': [9, 14, 10],
@@ -27,8 +27,8 @@ class UserBehaviorAnalyzer:
                 'completion_rate': 0.85
             }
         """
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        end_date = datetime.utcnow() + timedelta(days=days)
+        start_date = end_date - timedelta(days=days * 2)
         
         schedules = Schedule.query.filter(
             Schedule.user_id == user_id,
@@ -70,8 +70,8 @@ class UserBehaviorAnalyzer:
         """
         分析用户的周模式（哪几天比较忙）
         """
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(weeks=weeks)
+        end_date = datetime.utcnow() + timedelta(weeks=weeks)
+        start_date = end_date - timedelta(weeks=weeks * 2)
         
         schedules = Schedule.query.filter(
             Schedule.user_id == user_id,
@@ -138,12 +138,13 @@ class UserBehaviorAnalyzer:
         """
         分析用户的优先级分布
         """
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
+        end_date = datetime.utcnow() + timedelta(days=days)
+        start_date = end_date - timedelta(days=days * 2)
+
         schedules = Schedule.query.filter(
             Schedule.user_id == user_id,
-            Schedule.start_time >= start_date
+            Schedule.start_time >= start_date,
+            Schedule.start_time <= end_date
         ).all()
         
         priority_counts = Counter([s.priority for s in schedules])

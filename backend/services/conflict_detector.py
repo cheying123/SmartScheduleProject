@@ -3,6 +3,9 @@ from models.schedule import Schedule
 from services.user_behavior_analyzer import UserBehaviorAnalyzer
 from sqlalchemy import or_
 
+# 北京时间偏移量（分析与存储均基于 UTC+8）
+_BEIJING_OFFSET = timedelta(hours=8)
+
 
 def detect_schedule_conflicts(user_id, new_start_time, new_end_time, exclude_id=None):
     """
@@ -99,25 +102,28 @@ class ConflictDetector:
         max_search_days = 3 # 只往后找3天
         
         while len(suggestions) < 3 and (current_check - original_start_time).days <= max_search_days:
-            # 检查是否是繁忙日
-            if current_check.weekday() in busy_days:
+            # 转换为北京时间后再做时段和日期判断
+            local_check = current_check + _BEIJING_OFFSET
+
+            # 检查是否是繁忙日（基于北京时间）
+            if local_check.weekday() in busy_days:
                 current_check += timedelta(hours=1)
                 continue
-            
-            # 检查是否在高效时段内 (8点到20点之间)
-            hour = current_check.hour
-            if 8 <= hour <= 20:
+
+            # 检查是否在合理时段内 (8点到20点之间，北京时间)
+            local_hour = local_check.hour
+            if 8 <= local_hour <= 20:
                 # 计算结束时间
                 check_end = current_check + timedelta(minutes=duration_minutes)
-                
+
                 # 调用现有的检测逻辑检查是否有冲突
                 conflicts = ConflictDetector.detect_conflicts(user_id, current_check, check_end, exclude_id)
-                
+
                 if not conflicts:
                     # 如果该小时是高效时段，加分；否则普通
                     reason = "该时段无冲突"
-                    if hour in productive_hours:
-                        reason = f"这是您的高效工作时段（{hour}点），且无冲突"
+                    if local_hour in productive_hours:
+                        reason = f"这是您的高效工作时段（{local_hour}点），且无冲突"
                     
                     suggestions.append({
                         'start_time': current_check.isoformat(),

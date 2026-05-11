@@ -372,16 +372,16 @@ class AIService:
             logger.exception("分析最近日程失败")
             return "分析失败，请稍后重试"
 
-    def get_schedule_context_for_ai(self, user_id, days=7):
+    def get_schedule_context_for_ai(self, user_id, days=14):
         try:
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=days)
+            end_date = datetime.utcnow() + timedelta(days=14)
+            start_date = datetime.utcnow() - timedelta(days=days)
 
             schedules = Schedule.query.filter(
                 Schedule.user_id == user_id,
                 Schedule.start_time >= start_date,
                 Schedule.start_time <= end_date,
-            ).order_by(Schedule.start_time.desc()).limit(15).all()
+            ).order_by(Schedule.start_time.desc()).limit(20).all()
 
             if not schedules:
                 return "用户最近没有创建任何日程"

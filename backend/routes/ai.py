@@ -36,7 +36,7 @@ def chat():
         messages = [{'role': conv.role, 'content': conv.message} for conv in user_history]
 
         if len(user_history) == 0:
-            schedule_context = ai_service.get_schedule_context_for_ai(current_user_id, days=7)
+            schedule_context = ai_service.get_schedule_context_for_ai(current_user_id)
             messages.append({'role': 'user', 'content': f"我的日程数据如下：\n{schedule_context}\n\n我的问题是：{message}"})
         else:
             messages.append({'role': 'user', 'content': message})
