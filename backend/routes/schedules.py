@@ -93,14 +93,14 @@ def create_schedule(current_user):
         local_dt = datetime.fromisoformat(data['start_time'].replace('Z', ''))
         schedule_date = local_dt.strftime('%Y-%m-%d')
         
-        # 【新增】计算结束时间
+        # 计算结束时间
         end_dt = None
         if data.get('end_time'):
             end_dt = datetime.fromisoformat(data['end_time'].replace('Z', ''))
         else:
             end_dt = local_dt + timedelta(hours=1)
         
-        # 【新增】冲突检测
+        # 冲突检测
         conflicts = ConflictDetector.detect_conflicts(
             current_user.id,
             local_dt,
@@ -108,7 +108,7 @@ def create_schedule(current_user):
         )
         
         if conflicts:
-            # 【新增】当检测到冲突时，自动生成建议方案
+            # 当检测到冲突时，自动生成建议方案
             duration = 60
             if data.get('end_time'):
                 duration = int((end_dt - local_dt).total_seconds() / 60)
@@ -321,7 +321,7 @@ def create_schedule_natural(current_user):
         
         if conflicts:
 
-            # 【新增】当检测到冲突时，自动生成建议方案
+            # 当检测到冲突时，自动生成建议方案
             duration = 60
             if parsed_data.get('end_time'):
                 duration = int((parsed_data['end_time'] - parsed_data['start_time']).total_seconds() / 60)
@@ -951,7 +951,7 @@ def parse_query_text(query_text, user_timezone):
         '有', '在', '都', '就', '也', '还', '要', '想', '是', '和', '与',
     }
 
-    # ── 时段检测 ──
+
     morning_kw = ['上午', '早上', '早晨']
     afternoon_kw = ['下午', '中午']
     evening_kw = ['晚上', '傍晚', '夜间']
@@ -971,7 +971,7 @@ def parse_query_text(query_text, user_timezone):
                 time_of_day = 'evening'
                 break
 
-    # ── 星期几检测 ──
+
     weekday_map = {
         '周一': 0, '周二': 1, '周三': 2, '周四': 3, '周五': 4, '周六': 5,
         '周日': 6, '星期天': 6, '星期日': 6, '周天': 6,
@@ -983,7 +983,7 @@ def parse_query_text(query_text, user_timezone):
             matched_weekday = wd
             break
 
-    # ── 周范围检测 ──
+
     if '本周' in query_text or '这周' in query_text:
         days_since_monday = now.weekday()
         week_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1021,7 +1021,7 @@ def parse_query_text(query_text, user_timezone):
             start_date = week_start
             end_date = week_start + timedelta(weeks=1)
             description = f"上周({start_date.strftime('%m月%d日')} - {(end_date - timedelta(days=1)).strftime('%m月%d日')})"
-    # ── 相对日期检测 ──
+
     elif '今天' in query_text:
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
@@ -1042,7 +1042,7 @@ def parse_query_text(query_text, user_timezone):
         start_date = (now - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(days=1)
         description = f"前天({start_date.strftime('%m月%d日')})"
-    # ── 月范围检测 ──
+
     elif '本月' in query_text or '这个月' in query_text:
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         if now.month == 12:
@@ -1070,7 +1070,7 @@ def parse_query_text(query_text, user_timezone):
         last_day = calendar.monthrange(start_date.year, start_date.month)[1]
         end_date = start_date.replace(day=last_day) + timedelta(days=1)
         description = f"上个月({start_date.strftime('%Y年%m月')})"
-    # ── 指定月份："4月"、"12月"等（但不匹配"4月5日"这种具体日期）──
+
     elif re.search(r'(\d{1,2})月', query_text) and not re.search(r'(\d{1,2})月(\d{1,2})日', query_text):
         month_match = re.search(r'(\d{1,2})月', query_text)
         month = int(month_match.group(1))
@@ -1082,7 +1082,7 @@ def parse_query_text(query_text, user_timezone):
         start_date = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date.replace(day=last_day) + timedelta(days=1)
         description = f"{year}年{month}月"
-    # ── 仅星期几（无周修饰）→ 默认定位到本周 ──
+
     elif matched_weekday is not None:
         days_since_monday = now.weekday()
         week_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1090,7 +1090,7 @@ def parse_query_text(query_text, user_timezone):
         end_date = start_date + timedelta(days=1)
         day_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
         description = f"本周{day_names[matched_weekday]}({start_date.strftime('%m月%d日')})"
-    # ── 具体日期匹配 ──
+
     else:
         date_match = re.search(r'(\d{1,2})月(\d{1,2})日', query_text)
         if date_match:
@@ -1111,14 +1111,12 @@ def parse_query_text(query_text, user_timezone):
                 end_date = start_date + timedelta(days=1)
                 description = f"{start_date.strftime('%Y年%m月%d日')}"
 
-    # ── 兜底：无时间关键词时，默认查询本周 ──
     if start_date is None or end_date is None:
         days_since_monday = now.weekday()
         start_date = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = start_date + timedelta(weeks=1)
         description = f"本周({start_date.strftime('%m月%d日')} - {end_date.strftime('%m月%d日')})"
 
-    # ── 时段过滤应用于日期范围 ──
     if time_of_day == 'morning':
         start_date = start_date.replace(hour=6, minute=0, second=0, microsecond=0) if start_date.hour == 0 else start_date
         end_date = start_date + timedelta(hours=6) if end_date.hour == 0 else end_date
@@ -1132,8 +1130,7 @@ def parse_query_text(query_text, user_timezone):
         end_date = start_date + timedelta(hours=6) if end_date.hour == 0 else end_date
         description += ' 晚上'
 
-    # ── 内容关键词提取 ──
-    # 移除所有时间关键词后，剩余的非停用词作为内容过滤关键词
+
     cleaned = query_text
     for kw in sorted(time_keywords, key=len, reverse=True):
         cleaned = cleaned.replace(kw, '')

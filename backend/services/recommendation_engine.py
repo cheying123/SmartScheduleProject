@@ -9,12 +9,6 @@ logger = logging.getLogger(__name__)
 def generate_schedule_recommendations(user_id):
     """
     基于用户历史日程生成智能推荐
-    
-    Args:
-        user_id: 用户 ID
-        
-    Returns:
-        推荐列表
     """
     recommendations = []
     
@@ -145,7 +139,7 @@ def generate_schedule_recommendations(user_id):
             })
             break  # 只推荐一次休息
 
-    # ===== 优化后的天气相关建议 =====
+
     now_beijing = datetime.now() + timedelta(hours=8)
     today_beijing = now_beijing.date()
     tomorrow_beijing = today_beijing + timedelta(days=1)
@@ -294,7 +288,7 @@ def _generate_weather_advice(today_weather, tomorrow_weather, today_schedules, t
                 'weather_type': 'sunny'
             })
     
-    # ===== 明天的天气建议 =====
+    # 明天的天气建议 
     if tomorrow_weather and tomorrow_schedules:
         weather_text = tomorrow_weather.get('weather_text', '')
         temp_max = tomorrow_weather.get('temp_max', '')
@@ -336,7 +330,7 @@ def _generate_weather_advice(today_weather, tomorrow_weather, today_schedules, t
                 'weather_type': 'cold_tomorrow'
             })
     
-    # ===== 特殊场景建议 =====
+    # 特殊场景建议 
     # 今天和明天都有日程，且天气差异大
     if today_weather and tomorrow_weather and today_schedules and tomorrow_schedules:
         today_text = today_weather.get('weather_text', '')

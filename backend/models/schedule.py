@@ -17,7 +17,6 @@ class Schedule(db.Model):
     tags = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
 
-    # ========== 新增字段开始 ==========
     
     # 任务完成状态追踪（用于用户行为分析）
     is_completed = db.Column(db.Boolean, default=False)
@@ -46,12 +45,10 @@ class Schedule(db.Model):
             'tags': self.tags,
             'created_at': self.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') if self.created_at else None,
 
-            # ========== 新增字段序列化 ==========
             'is_completed': self.is_completed,
             'completed_at': self.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if self.completed_at else None,
             'location': self.location,
             'is_meeting': self.is_meeting,
             'meeting_url': self.meeting_url,
             'attendees': self.attendees
-            # ========== 新增字段序列化结束 ==========
         }

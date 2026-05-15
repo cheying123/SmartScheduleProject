@@ -46,14 +46,14 @@ def create_app():
     app.register_blueprint(users_bp)
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(weather_bp)
-    app.register_blueprint(location_bp)  # 新增
-    app.register_blueprint(analytics_bp)  # 新增：注册分析蓝图
+    app.register_blueprint(location_bp)  
+    app.register_blueprint(analytics_bp)  # 注册分析蓝图
     app.register_blueprint(ai_bp) # AI 分析助手（使用 ANALYSIS_AI_* 配置）
     
-    # ⚙️ 启动定时任务：每天凌晨 00:01 检查重复日程
+    # 启动定时任务：每天凌晨 00:01 检查重复日程
     scheduler = BackgroundScheduler()
 
-    # 修复：使用 app.app_context() 包装任务，确保数据库操作有上下文
+    # 使用 app.app_context() 包装任务，确保数据库操作有上下文
     def job_wrapper():
         with app.app_context():
             try:
@@ -63,7 +63,7 @@ def create_app():
 
 
     scheduler.add_job(
-        func=job_wrapper,  # ← 这里要改成 job_wrapper，不能直接传 RecurringService...
+        func=job_wrapper,  
         trigger="cron",
         hour=0,
         minute=1,

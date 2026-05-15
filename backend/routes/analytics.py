@@ -90,7 +90,7 @@ def auto_schedule_tasks():
         current_user_id = get_jwt_identity()
         data = request.get_json()
         
-        tasks = data.get('tasks', [])  # 格式: [{'title': '复习数学', 'duration_minutes': 60}, ...]
+        tasks = data.get('tasks', [])  
         days_to_scan = data.get('days', 3)  # 默认扫描未来3天
         
         if not tasks:

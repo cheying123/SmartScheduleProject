@@ -6,7 +6,9 @@
     <div class="briefing-body">
       <div class="briefing-header-row">
         <h3>🌤️ 今日智能提醒</h3>
-        <!-- 语音播报已关闭 -->
+          <button class="speak-btn-mini" @click="speakBriefing" title="朗读">
+            <Volume2 :size="16" />
+          </button>
 
       </div>
       
@@ -40,7 +42,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import { MessageSquare, Calendar, Sun, Sparkles } from 'lucide-vue-next';
+import { MessageSquare, Calendar, Sun, Sparkles, Volume2 } from 'lucide-vue-next';
 
 // 定义组件的 props
 const props = defineProps({
@@ -65,11 +67,21 @@ const props = defineProps({
 // 定义组件的 emits
 const emit = defineEmits(['refresh-briefing']);
 
-// 语音播报已关闭
 
 // 刷新摘要函数
 async function refreshBriefing() {
   emit('refresh-briefing');
+}
+
+// 朗读简报
+function speakBriefing() {
+  const text = props.dailyBriefing?.ai_advice || props.dailyBriefing?.message;
+  if (!text || !window.speechSynthesis) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'zh-CN';
+  utterance.rate = 1.0;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
 }
 </script>
 

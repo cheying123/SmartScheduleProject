@@ -1,8 +1,5 @@
 
-# """
-# 用户行为分析服务
-# 分析用户的日程习惯、工作效率时间段，为智能推荐提供数据支持
-# """
+
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from models.schedule import Schedule
