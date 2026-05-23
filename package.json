@@ -1,0 +1,11 @@
+{
+  "name": "smart-schedule",
+  "version": "1.0.0",
+  "description": "SmartSchedule 智能日程管理桌面应用",
+  "author": "cheying123",
+  "license": "MIT",
+  "scripts": {
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "devDependencies": {}
+}

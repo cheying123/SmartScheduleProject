@@ -20,3 +20,8 @@ gevent==23.9.1              # 生产环境并发支持
 icalendar==4.0.9            # iCal 格式导入导出
 
 # AI 调用（项目直接使用 requests 调用 API，无需 openai SDK）
+
+# 桌面版依赖
+pywebview==5.4              # 原生桌面窗口（使用系统 WebView2）
+waitress==3.0.2             # 生产级 WSGI 服务器
+Pillow>=10.0.0              # 托盘图标生成

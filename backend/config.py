@@ -5,16 +5,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # 数据库配置
+    # ========== 数据库配置 ==========
+    # 优先使用 MySQL（配置了 DB_HOST 时），否则自动使用 SQLite
     DB_USER = os.getenv('DB_USER')
     DB_PASSWORD = os.getenv('DB_PASSWORD')
     DB_HOST = os.getenv('DB_HOST')
     DB_NAME = os.getenv('DB_NAME')
 
-    if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
-        raise ValueError("缺少必要的数据库环境变量配置")
+    # 桌面模式强制使用 SQLite（Electron 启动时设置此环境变量）
+    if os.getenv('SMARTSCHEDULE_DESKTOP') == 'true':
+        DB_HOST = None
 
-    SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}'
+    if DB_HOST:
+        # MySQL 模式
+        if not all([DB_USER, DB_PASSWORD, DB_NAME]):
+            raise ValueError("配置了 DB_HOST 但缺少 DB_USER/DB_PASSWORD/DB_NAME")
+        SQLALCHEMY_DATABASE_URI = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}'
+    else:
+        # SQLite 模式（默认，无需安装任何数据库）
+        db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+        os.makedirs(db_dir, exist_ok=True)
+        SQLALCHEMY_DATABASE_URI = f'sqlite:///{os.path.join(db_dir, "schedule.db")}'
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # JWT 配置

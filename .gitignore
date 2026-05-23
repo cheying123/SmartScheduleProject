@@ -13,7 +13,20 @@ venv/
 
 # Node
 node_modules/
+frontend/node_modules/
 frontend/dist/
+
+# 打包输出
+release/
+*.exe
+
+# 应用数据（SQLite 数据库等）
+data/
+
+# PyInstaller 构建输出
+build/
+dist/
+*.spec
 
 # IDE
 .idea/
