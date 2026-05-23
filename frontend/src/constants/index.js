@@ -1,7 +1,4 @@
-/**
- * 常量配置文件
- * 文件路径：frontend/src/constants/index.js
- */
+
 
 // 导航标签
 export const NAVIGATION = {

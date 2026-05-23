@@ -1,5 +1,4 @@
-<!-- 文件路径：d:\SmartScheduleProject\frontend\src\components\common\CountdownDisplay.vue -->
-<!-- 操作：新建此文件 -->
+
 
 <script setup>
 import { Clock, AlertCircle, Bell, Calendar } from 'lucide-vue-next'

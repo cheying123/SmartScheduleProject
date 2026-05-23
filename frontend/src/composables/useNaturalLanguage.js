@@ -1,7 +1,4 @@
-/**
- * 自然语言输入 Composable（包含语音识别）
- * 文件路径：frontend/src/composables/useNaturalLanguage.js
- */
+
 
 import { ref, onUnmounted } from 'vue'
 import axios from 'axios'

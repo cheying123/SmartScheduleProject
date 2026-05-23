@@ -1,8 +1,4 @@
-#!/usr/bin/env python3
-"""
-代码行数统计工具
-递归统计指定文件夹中代码文件的行数，支持排除目录和自定义扩展名。
-"""
+
 
 import os
 import argparse

@@ -30,7 +30,7 @@ def update_profile(current_user):
         if 'username' in data:
             current_user.username = data['username']
         if 'email' in data:
-            current_user.email = data['email']
+            current_user.email = data['email'] if data['email'] else None
         if 'location' in data:
             current_user.location = data['location']
             if data.get('location_name'):

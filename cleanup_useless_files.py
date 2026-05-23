@@ -1,14 +1,4 @@
-#!/usr/bin/env python3
-"""
-智能日程管理系统 - 清理无用文件脚本
 
-此脚本用于删除项目中已识别的无用文件和目录。
-注意：运行此脚本将永久删除以下文件：
-1. test.py - 临时测试文件
-2. fix_homeview.py - 一次性修复脚本
-3. LocationList-master 目录 - 未使用的天气地点列表
-4. LocationList-master.zip - 上述目录的压缩文件
-"""
 
 import os
 import sys

@@ -1,4 +1,4 @@
-// 创建新文件：d:\SmartScheduleProject\frontend\src\composables\useAIChat.js
+
 import { ref } from 'vue'
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'

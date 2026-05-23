@@ -1,7 +1,4 @@
-/**
- * 用户资料管理 Composable
- * 文件路径：frontend/src/composables/useProfile.js
- */
+
 
 import { ref } from 'vue'
 import axios from 'axios'
@@ -66,7 +63,7 @@ export function useProfile(userStore, API_URL) {
       return true
     } catch (error) {
       console.error('更新失败:', error)
-      alert('更新失败，请重试')
+      alert('更新失败: ' + (error.response?.data?.error || error.message))
       return false
     }
   }

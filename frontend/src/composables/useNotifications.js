@@ -1,7 +1,4 @@
-/**
- * 推荐和通知 Composable
- * 文件路径：frontend/src/composables/useNotifications.js
- */
+
 
 import { ref } from 'vue'
 import axios from 'axios'

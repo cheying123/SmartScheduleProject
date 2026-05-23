@@ -1,7 +1,4 @@
-/**
- * 日程管理 Composable
- * 文件路径：frontend/src/composables/useSchedule.js
- */
+
 
 import { ref } from 'vue'
 import axios from 'axios'
